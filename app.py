@@ -6,6 +6,8 @@
 import base64
 import json
 import random
+
+import requests
 from datetime import date, datetime
 from pathlib import Path
 
@@ -47,9 +49,11 @@ BG_FILE     = "base_wide.jpg"   # 나무 없는 하늘·언덕·팻말
 TREES = [
     None,
     {"f": "tree_s.webp", "left": 47.20, "top": 57.91, "w": 5.21,  "sway": 1.6, "dur": 4.5},
-    {"f": "tree_m.webp", "left": 32.08, "top": 31.80, "w": 38.93, "sway": 0.9, "dur": 6.5},
-    {"f": "tree_l.webp", "left": 29.02, "top": 19.25, "w": 42.00, "sway": 0.6, "dur": 8.0},
+    {"f": "tree_m.webp", "left": 46.92, "top": 31.80, "w": 19.93, "sway": 0.9, "dur": 6.5},
+    {"f": "tree_l.webp", "left": 33.54, "top": 19.25, "w": 35.93, "sway": 0.6, "dur": 8.0},
 ]
+
+BG_RATIO = "1400 / 788"   # 배경 그림 비율. 나무·꽃 좌표가 이 판 위에서 계산됩니다.
 STAGE_LABEL = ["아직 아무것도", "묘목", "자라는 중", "큰 나무"]
 
 # 꾸미기 아이템 — sky=하늘에 뜨는 것, ground=땅에 놓는 것
@@ -87,14 +91,64 @@ def cuts(key):
 
 
 # ─────────────────────────────────────────────────────────────
-# 저장소 — 반마다 별도 파일. 한 줄에 편지 하나씩 append.
+# 저장소
+#
+# Supabase 가 설정되어 있으면 거기에, 없으면 로컬 파일에 저장합니다.
+# Streamlit Community Cloud 는 앱이 잠들거나 재배포되면 파일이 사라지므로
+# 실제 수업에서는 반드시 Supabase 를 설정해야 합니다.
+#
+# .streamlit/secrets.toml (또는 Streamlit Cloud 의 Secrets):
+#   SUPABASE_URL = "https://xxxx.supabase.co"
+#   SUPABASE_KEY = "eyJ..."
 # ─────────────────────────────────────────────────────────────
-def data_file(key):
-    return DATA_DIR / f"letters_{key}.jsonl"
+def sb_conf():
+    try:
+        url = st.secrets["SUPABASE_URL"].rstrip("/")
+        key = st.secrets["SUPABASE_KEY"]
+    except Exception:
+        return None
+    if not url or not key:
+        return None
+    return url, key
 
 
-def load_letters(key):
-    path = data_file(key)
+def sb_headers():
+    _, key = sb_conf()
+    return {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+
+
+def sb_select(table, class_key):
+    url, _ = sb_conf()
+    r = requests.get(
+        f"{url}/rest/v1/{table}",
+        headers=sb_headers(),
+        params={"class_key": f"eq.{class_key}", "select": "*", "order": "id.asc"},
+        timeout=10,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def sb_insert(table, row):
+    url, _ = sb_conf()
+    r = requests.post(
+        f"{url}/rest/v1/{table}", headers=sb_headers(), json=row, timeout=10
+    )
+    if r.status_code >= 400:
+        raise RuntimeError(f"{r.status_code} {r.text[:200]}")
+
+
+# 매 조작마다 서버를 부르지 않도록 잠깐 캐시합니다. 쓰기 직후에는 비웁니다.
+@st.cache_data(ttl=15, show_spinner=False)
+def _read(table, class_key, _bust=0):
+    if sb_conf():
+        return sb_select(table, class_key)
+    path = DATA_DIR / f"{table}_{class_key}.jsonl"
     if not path.exists():
         return []
     out = []
@@ -109,49 +163,46 @@ def load_letters(key):
     return out
 
 
+def _write(table, class_key, row):
+    if sb_conf():
+        sb_insert(table, dict(row, class_key=class_key))
+    else:
+        DATA_DIR.mkdir(exist_ok=True)
+        with open(DATA_DIR / f"{table}_{class_key}.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    _read.clear()
+
+
+def storage_label():
+    return "Supabase" if sb_conf() else "로컬 파일(임시)"
+
+
+# ── 편지 ──────────────────────────────────────────────────────
+def load_letters(key):
+    return _read("letters", key)
+
+
 def save_letter(key, record):
-    DATA_DIR.mkdir(exist_ok=True)
-    with open(data_file(key), "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    _write("letters", key, record)
 
 
 def find_letter(key, number):
     for r in load_letters(key):
-        if r["number"] == number:
+        if str(r["number"]) == str(number):
             return r
     return None
 
 
-# ─────────────────────────────────────────────────────────────
-# 농장 꾸미기 — 추가만 하는 기록장(append-only)
+# ── 농장 꾸미기 — 추가만 하는 기록장(append-only) ──────────────
 #
-# 지우기는 아이들도 할 수 있지만, 파일에서 줄이 사라지지는 않습니다.
+# 지우기는 아이들도 할 수 있지만, 기록이 사라지지는 않습니다.
 # 지움도 하나의 기록으로 덧붙습니다. 그래서 언제든 되돌릴 수 있습니다.
-# ─────────────────────────────────────────────────────────────
-def garden_file(key):
-    return DATA_DIR / f"garden_{key}.jsonl"
-
-
 def garden_log(key):
-    path = garden_file(key)
-    if not path.exists():
-        return []
-    out = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    out.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-    return out
+    return _read("garden", key)
 
 
 def garden_append(key, event):
-    DATA_DIR.mkdir(exist_ok=True)
-    with open(garden_file(key), "a", encoding="utf-8") as f:
-        f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    _write("garden", key, event)
 
 
 def garden_state(key, log=None):
@@ -159,9 +210,9 @@ def garden_state(key, log=None):
     placed = {}
     for e in (garden_log(key) if log is None else log):
         if e.get("op") == "add":
-            placed[e["id"]] = e
+            placed[e["event_id"]] = e
         elif e.get("op") == "remove":
-            placed.pop(e.get("id"), None)
+            placed.pop(e.get("event_id"), None)
     return list(placed.values())
 
 
@@ -169,7 +220,7 @@ def garden_place(key, number, item, x, y):
     # 같은 밀리초에 두 개를 놓으면 id가 겹쳐 하나가 사라집니다. 난수를 붙입니다.
     eid = f"{number}-{int(datetime.now().timestamp()*1000)}-{random.randrange(1<<24):06x}"
     garden_append(key, {
-        "op": "add", "id": eid, "number": number, "item": item,
+        "op": "add", "event_id": eid, "number": number, "item": item,
         "x": round(x, 1), "y": round(y, 1),
         "at": datetime.now().isoformat(timespec="seconds"),
     })
@@ -178,7 +229,7 @@ def garden_place(key, number, item, x, y):
 
 def garden_remove(key, eid, by):
     garden_append(key, {
-        "op": "remove", "id": eid, "by": by,
+        "op": "remove", "event_id": eid, "by": by,
         "at": datetime.now().isoformat(timespec="seconds"),
     })
 
@@ -231,14 +282,7 @@ def inject_css(stage_file, intro=False):
     css = f"""
 @import url('https://fonts.googleapis.com/css2?family=Gaegu:wght@400;700&family=Gowun+Dodum&display=swap');
   #MainMenu, footer, header {{visibility: hidden;}}
-  .stApp {{
-    --scene-bg: url("{bg}");
-    background-image: var(--scene-bg);
-    background-size: cover;
-    background-position: center center;
-    background-attachment: fixed;
-    background-color: #f3ece2;
-  }}
+  .stApp {{background-color: #f3ece2;}}
   [data-testid="stAppViewContainer"],
   [data-testid="stMain"],
   [data-testid="stHeader"],
@@ -341,7 +385,21 @@ def inject_css(stage_file, intro=False):
     position: fixed; inset: 0; z-index: 0;
     pointer-events: none; overflow: hidden;
   }}
-  .backdrop img {{position: absolute;}}
+  /* 그림판 — 화면을 덮되 그림 비율을 유지합니다.
+     나무와 꽃의 %좌표가 이 판을 기준으로 하므로, 화면 비율이 바뀌어도
+     언덕 위에 놓인 것이 하늘로 떠오르지 않습니다. */
+  .canvas {{
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%; height: auto;
+    aspect-ratio: {BG_RATIO};
+    background-image: url("{bg}");
+    background-size: 100% 100%;
+  }}
+  @media (max-aspect-ratio: {BG_RATIO}) {{
+    .canvas {{width: auto; height: 100%;}}
+  }}
+  .canvas img {{position: absolute;}}
   .tree {{
     transform-origin: 50% 100%;
     filter: drop-shadow(0 4px 8px rgba(90,70,40,0.10));
@@ -434,7 +492,7 @@ def render_backdrop(key, extra=None, stage=None):
         scale = 0.75 + (e["y"] / 100) * 0.55          # 아래쪽일수록 가깝게 = 크게
         w = meta["w"] * scale
         cls = "flyA" if meta["zone"] == "sky" else "swayA"
-        ghost = " ghost" if e.get("id") == "_preview" else ""
+        ghost = " ghost" if e.get("event_id") == "_preview" else ""
         layers.append(
             f'<img class="deco {cls}{ghost}" src="{asset_url("items/" + e["item"] + ".webp")}" '
             f'style="left:{e["x"]}%;top:{e["y"]}%;width:{w:.1f}%;'
@@ -442,7 +500,10 @@ def render_backdrop(key, extra=None, stage=None):
             f'animation-delay:{(i % 7) * 0.4:.1f}s;" alt="">'
         )
 
-    st.markdown(f'<div class="backdrop">{"".join(layers)}</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="backdrop"><div class="canvas">{"".join(layers)}</div></div>',
+        unsafe_allow_html=True,
+    )
     return items
 
 
@@ -514,12 +575,18 @@ def page_write(key):
             st.error(f"{num}번은 이미 편지를 넣었어요. '내 나무 보기'에서 확인할 수 있어요.")
             return
 
-        save_letter(key, {
-            "number": num,
-            "nickname": nickname.strip(),
-            "body": body.strip(),
-            "written_at": datetime.now().isoformat(timespec="seconds"),
-        })
+        try:
+            save_letter(key, {
+                "number": num,
+                "nickname": nickname.strip(),
+                "body": body.strip(),
+                "written_at": datetime.now().isoformat(timespec="seconds"),
+            })
+        except Exception as err:
+            # 조용히 실패하면 아이는 저장된 줄 압니다. 반드시 알려야 합니다.
+            st.error("편지를 넣지 못했어요. 아래 내용을 복사해 두고 선생님께 알려 주세요.")
+            st.exception(err)
+            return
         st.session_state.just_saved = num
         st.rerun()
 
@@ -544,7 +611,7 @@ def page_tree(key):
         item = st.session_state.get(f"g_item_{key}")
         if item:
             preview = {
-                "id": "_preview", "number": number, "item": item,
+                "event_id": "_preview", "number": number, "item": item,
                 "x": st.session_state.get(f"g_x_{key}", 50),
                 "y": st.session_state.get(f"g_y_{key}", 80),
             }
@@ -584,10 +651,15 @@ def page_tree(key):
                       value=st.session_state.get(f"g_y_{key}", 42))
 
         if st.button("여기에 놓기", key=f"g_put_{key}"):
-            garden_place(key, number,
-                         st.session_state[f"g_item_{key}"],
-                         st.session_state[f"g_x_{key}"],
-                         st.session_state[f"g_y_{key}"])
+            try:
+                garden_place(key, number,
+                             st.session_state[f"g_item_{key}"],
+                             st.session_state[f"g_x_{key}"],
+                             st.session_state[f"g_y_{key}"])
+            except Exception as err:
+                st.error("놓지 못했어요. 잠시 뒤에 다시 해 보세요.")
+                st.exception(err)
+                return
             st.rerun()
     else:
         st.caption(f"한 사람이 {MAX_PER_STUDENT}개까지 놓을 수 있어요. 하나를 치우면 다시 놓을 수 있어요.")
@@ -602,8 +674,8 @@ def page_tree(key):
                 st.markdown(f'<span class="badge">{ITEMS[e["item"]]["label"]}</span>',
                             unsafe_allow_html=True)
             with col2:
-                if st.button("치우기", key=f"g_del_{e['id']}"):
-                    garden_remove(key, e["id"], by=number)
+                if st.button("치우기", key=f"g_del_{e['event_id']}"):
+                    garden_remove(key, e["event_id"], by=number)
                     st.rerun()
         st.caption("치워도 기록은 남아서 선생님이 되돌릴 수 있어요.")
 
@@ -621,6 +693,11 @@ def page_tree(key):
 def page_open():
     keys = list(CLASSES.keys())
     labels = [CLASSES[k]["name"] for k in keys]
+    if not sb_conf():
+        st.warning(
+            "지금은 임시 저장(로컬 파일)입니다. 앱이 잠들거나 재배포되면 "
+            "편지와 꾸민 것이 모두 사라집니다. Supabase 를 설정해 주세요."
+        )
     picked = st.selectbox("반", labels, key="open_class")
     key = keys[labels.index(picked)]
 
@@ -669,15 +746,19 @@ def page_open():
         removed = [e for e in garden_log(key) if e.get("op") == "remove"]
         if removed:
             with st.expander(f"치워진 것 되돌리기 ({len(removed)}개 기록)"):
-                state_ids = {e["id"] for e in garden_state(key)}
-                adds = {e["id"]: e for e in garden_log(key) if e.get("op") == "add"}
-                for r in reversed(removed[-20:]):
-                    a = adds.get(r["id"])
-                    if not a or a["id"] in state_ids:
+                state_ids = {e["event_id"] for e in garden_state(key)}
+                adds = {e["event_id"]: e for e in garden_log(key) if e.get("op") == "add"}
+                seen = set()
+                for r in reversed(removed[-30:]):
+                    a = adds.get(r["event_id"])
+                    if not a or a["event_id"] in state_ids or a["event_id"] in seen:
                         continue
+                    seen.add(a["event_id"])
                     lbl = ITEMS.get(a["item"], {}).get("label", a["item"])
-                    if st.button(f"{a['number']}번의 {lbl} 되돌리기", key=f"undo_{r['id']}"):
-                        garden_append(key, dict(a, at=datetime.now().isoformat(timespec="seconds")))
+                    if st.button(f"{a['number']}번의 {lbl} 되돌리기", key=f"undo_{r['event_id']}"):
+                        garden_append(key, {k2: v for k2, v in a.items()
+                                            if k2 in ("op", "event_id", "number", "item", "x", "y")}
+                                      | {"at": datetime.now().isoformat(timespec="seconds")})
                         st.rerun()
         return
 
