@@ -394,7 +394,12 @@ def inject_css(stage_file, intro=False):
     z-index: 0;
     {bg_anim}
   }}
+  /* 배경은 맨 뒤, 본문은 그 위. 그리는 순서에만 기대지 않도록 못을 박습니다. */
   .block-container {{position: relative; z-index: 1;}}
+  [data-testid="stVerticalBlock"],
+  [data-testid="stHorizontalBlock"],
+  [data-testid="stElementContainer"],
+  [data-testid="stForm"] {{position: relative; z-index: 1;}}
   @keyframes veilOut {{from {{opacity: 1;}} to {{opacity: 0;}}}}
 
   /* 시작 화면 아이콘 */
@@ -844,6 +849,11 @@ def page_open():
         return
 
     c = cfg(key)
+
+    # 배경은 반드시 위젯보다 "먼저" 그려야 합니다.
+    # position:fixed 라 나중에 그리면 앞선 위젯들을 덮어 가려 버립니다.
+    render_backdrop(key, stage=3, guide=st.session_state.get("guide_on", False))
+
     top1, top2 = st.columns([1, 1])
     with top1:
         if st.button("← 다른 반", key="back_class", use_container_width=True):
@@ -855,11 +865,9 @@ def page_open():
         st.markdown(f'<div style="padding-top:0.5rem;"><span class="badge">{c["name"]}</span></div>',
                     unsafe_allow_html=True)
 
-    guide = st.checkbox("정렬 확인", key="guide_on",
-                        help="빨간 테두리는 그림판, 빨간 가로선은 언덕선입니다. "
-                             "선이 언덕 위에 놓이고 나무 밑동이 그 선에 닿으면 정상입니다.")
-    # 개봉 화면 배경 = 그 반이 꾸민 농장. 나무는 다 자란 모습으로 고정합니다.
-    render_backdrop(key, stage=3, guide=guide)
+    st.checkbox("정렬 확인", key="guide_on",
+                help="빨간 테두리는 그림판, 빨간 가로선은 언덕선입니다. "
+                     "선이 언덕 위에 놓이고 나무 밑동이 그 선에 닿으면 정상입니다.")
 
     try:
         letters = load_letters(key)
