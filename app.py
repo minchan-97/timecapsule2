@@ -802,41 +802,59 @@ def page_tree(key):
 # 화면 3 — 개봉 (교사용)
 # ─────────────────────────────────────────────────────────────
 def page_open():
-    keys = list(CLASSES.keys())
-    labels = [CLASSES[k]["name"] for k in keys]
-    if not sb_conf():
-        st.warning(
-            "지금은 임시 저장(로컬 파일)입니다. 앱이 잠들거나 재배포되면 "
-            "편지와 꾸민 것이 모두 사라집니다. Supabase 를 설정해 주세요."
-        )
-    else:
-        checks = sb_check()
-        bad = {t: m for t, (ok, m) in checks.items() if not ok}
-        if bad:
-            st.error("Supabase 연결에 문제가 있습니다.")
-            for t, m in bad.items():
-                st.code(m, language=None)
-            st.caption("SUPABASE.md 의 2단계(표 만들기)와 4단계(Secrets)를 다시 확인하세요.")
-            st.caption(f"실제로 부른 주소: `{sb_conf()[0]}/rest/v1/letters`")
+    # 반 고르기를 드롭다운이 아니라 별도 화면의 버튼으로 둡니다.
+    # 화면에서 놓칠 일이 없고, 수업 중에 누르기도 쉽습니다.
+    key = st.session_state.get("open_key")
+
+    if not key:
+        st.markdown('<div class="sky-title">어느 반을 열까요</div>', unsafe_allow_html=True)
+
+        if not sb_conf():
+            st.warning(
+                "지금은 임시 저장(로컬 파일)입니다. 앱이 잠들거나 재배포되면 "
+                "편지와 꾸민 것이 모두 사라집니다. Supabase 를 설정해 주세요."
+            )
         else:
-            st.caption(f"Supabase 연결 정상 · {sb_conf()[0]}")
+            bad = {t: m for t, (ok, m) in sb_check().items() if not ok}
+            if bad:
+                st.error("Supabase 연결에 문제가 있습니다.")
+                for t, m in bad.items():
+                    st.code(m, language=None)
+                st.caption(f"실제로 부른 주소: `{sb_conf()[0]}/rest/v1/letters`")
+            else:
+                st.caption(f"Supabase 연결 정상 · {sb_conf()[0]}")
 
-    stale = assets_ok()
-    if stale:
-        st.error("static 폴더가 옛 버전입니다. 나무 위치가 어긋납니다.")
-        st.code("\n".join(stale), language=None)
-        st.caption("압축파일의 static 폴더로 통째로 교체한 뒤 다시 배포하세요.")
+        stale = assets_ok()
+        if stale:
+            st.error("static 폴더가 옛 버전입니다. 나무 위치가 어긋납니다.")
+            st.code("\n".join(stale), language=None)
 
-    picked = st.selectbox("반", labels, key="open_class")
-    key = keys[labels.index(picked)]
-
-    # 반을 바꾸면 진행 상태 초기화
-    if st.session_state.get("open_key") != key:
-        st.session_state.open_key = key
-        st.session_state.pop("order", None)
-        st.session_state.idx = -1
+        ks = list(CLASSES.keys())
+        for row in range(0, len(ks), 2):
+            cols = st.columns(2)
+            for col, k in zip(cols, ks[row:row + 2]):
+                with col:
+                    n = len(load_letters(k, safe=True))
+                    if st.button(f"{CLASSES[k]['name']}  ({n}통)", key=f"pick_{k}",
+                                 use_container_width=True):
+                        st.session_state.open_key = k
+                        st.session_state.pop("order", None)
+                        st.session_state.idx = -1
+                        st.rerun()
+        return
 
     c = cfg(key)
+    top1, top2 = st.columns([1, 1])
+    with top1:
+        if st.button("← 다른 반", key="back_class", use_container_width=True):
+            st.session_state.pop("open_key", None)
+            st.session_state.pop("order", None)
+            st.session_state.idx = -1
+            st.rerun()
+    with top2:
+        st.markdown(f'<div style="padding-top:0.5rem;"><span class="badge">{c["name"]}</span></div>',
+                    unsafe_allow_html=True)
+
     guide = st.checkbox("정렬 확인", key="guide_on",
                         help="빨간 테두리는 그림판, 빨간 가로선은 언덕선입니다. "
                              "선이 언덕 위에 놓이고 나무 밑동이 그 선에 닿으면 정상입니다.")
