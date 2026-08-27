@@ -40,7 +40,16 @@ MUSIC_FILE  = "music.mp3"
 DATA_DIR = Path("data")
 STATIC   = Path("static")
 
-STAGES      = ["stage1_wide.jpg", "stage2_wide.jpg", "stage3_wide.jpg", "stage4_wide.jpg"]
+BG_FILE     = "base_wide.jpg"   # 나무 없는 하늘·언덕·팻말
+
+# 나무는 배경에서 떼어낸 별도 레이어입니다. 그래야 바람에 흔들 수 있습니다.
+# 값은 배경 그림 안에서의 위치(%)로, 원래 그려져 있던 자리 그대로입니다.
+TREES = [
+    None,
+    {"f": "tree_s.webp", "left": 47.20, "top": 57.91, "w": 5.21,  "sway": 1.6, "dur": 4.5},
+    {"f": "tree_m.webp", "left": 32.08, "top": 31.80, "w": 38.93, "sway": 0.9, "dur": 6.5},
+    {"f": "tree_l.webp", "left": 29.02, "top": 19.25, "w": 42.00, "sway": 0.6, "dur": 8.0},
+]
 STAGE_LABEL = ["아직 아무것도", "묘목", "자라는 중", "큰 나무"]
 
 # 꾸미기 아이템 — sky=하늘에 뜨는 것, ground=땅에 놓는 것
@@ -327,20 +336,25 @@ def inject_css(stage_file, intro=False):
     background: rgba(253,249,240,0.95); border: 1px solid rgba(139,111,78,0.3);
   }}
   .stTextArea textarea {{font-family: 'Gaegu', cursive; font-size: 1.25rem; line-height: 1.9;}}
-  /* 농장 화면 */
-  .scene {{
-    position: relative; width: 100%; overflow: hidden;
-    border-radius: 6px; box-shadow: 0 6px 22px rgba(90,70,40,0.18);
-    background: #dceaf2;
+  /* 농장 배경 — 화면 전체 */
+  .backdrop {{
+    position: fixed; inset: 0; z-index: 0;
+    pointer-events: none; overflow: hidden;
   }}
-  .scene-bg {{
-    position: absolute; inset: 0;
-    background-image: var(--scene-bg);
-    background-size: cover;
-    background-position: center center;
+  .backdrop img {{position: absolute;}}
+  .tree {{
+    transform-origin: 50% 100%;
+    filter: drop-shadow(0 4px 8px rgba(90,70,40,0.10));
+    animation-name: treeSway;
+    animation-iteration-count: infinite;
+    animation-timing-function: ease-in-out;
+  }}
+  @keyframes treeSway {{
+    0%, 100% {{transform: rotate(calc(var(--sway) * -1));}}
+    50%      {{transform: rotate(var(--sway));}}
   }}
   .deco {{
-    position: absolute; transform-origin: 50% 100%;
+    transform-origin: 50% 100%;
     transform: translate(-50%, -100%);
     filter: drop-shadow(0 3px 5px rgba(90,70,40,0.18));
     animation-iteration-count: infinite;
@@ -354,11 +368,11 @@ def inject_css(stage_file, intro=False):
   }}
   @keyframes flyA {{
     0%, 100% {{transform: translate(-50%, -50%) translate(0, 0) rotate(-3deg);}}
-    50%      {{transform: translate(-50%, -50%) translate(14px, -10px) rotate(3deg);}}
+    50%      {{transform: translate(-50%, -50%) translate(16px, -12px) rotate(3deg);}}
   }}
-  .ghost {{opacity: 0.62;}}
+  .ghost {{opacity: 0.55;}}
   @media (prefers-reduced-motion: reduce) {{
-    .deco {{animation: none !important;}}
+    .deco, .tree {{animation: none !important;}}
   }}
 """
     # 빈 줄이 하나라도 있으면 Streamlit 마크다운이 HTML 블록을 끊어버려
@@ -393,40 +407,42 @@ def esc(s):
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def render_scene(key, extra=None, height_vh=58):
-    """배경 그림 위에 꾸민 것들을 얹어 보여줍니다.
+def render_backdrop(key, extra=None, stage=None):
+    """화면 전체를 그 반의 농장으로 만듭니다.
 
-    바람 효과는 CSS 흔들림입니다. 배경 그림 속 나무는 그림이라 못 움직이고,
-    올려놓은 꽃과 나비만 흔들립니다.
+    배경 그림(나무 없음) 위에 나무 레이어와 꾸민 것들을 얹습니다.
+    나무를 따로 떼어냈기 때문에 바람에 흔들 수 있습니다.
     """
+    layers = []
+
+    idx = stage if stage is not None else stage_index(key)
+    t = TREES[idx]
+    if t:
+        layers.append(
+            f'<img class="tree" src="{asset_url(t["f"])}" '
+            f'style="left:{t["left"]}%;top:{t["top"]}%;width:{t["w"]}%;'
+            f'--sway:{t["sway"]}deg;animation-duration:{t["dur"]}s;" alt="">'
+        )
+
     items = garden_state(key)
     if extra:
         items = items + [extra]
-
-    layers = []
     for i, e in enumerate(items):
         meta = ITEMS.get(e["item"])
         if not meta:
             continue
-        # 아래쪽에 놓을수록 가까이 있는 것처럼 크게
-        depth = e["y"] / 100
-        scale = 0.75 + depth * 0.55
+        scale = 0.75 + (e["y"] / 100) * 0.55          # 아래쪽일수록 가깝게 = 크게
         w = meta["w"] * scale
-        sway = "flyA" if meta["zone"] == "sky" else "swayA"
-        dur = 3.2 + (i % 5) * 0.7
-        delay = (i % 7) * 0.4
+        cls = "flyA" if meta["zone"] == "sky" else "swayA"
+        ghost = " ghost" if e.get("id") == "_preview" else ""
         layers.append(
-            f'<img class="deco {sway}" src="{asset_url("items/" + e["item"] + ".webp")}" '
+            f'<img class="deco {cls}{ghost}" src="{asset_url("items/" + e["item"] + ".webp")}" '
             f'style="left:{e["x"]}%;top:{e["y"]}%;width:{w:.1f}%;'
-            f'animation-duration:{dur:.1f}s;animation-delay:{delay:.1f}s;" alt="">'
+            f'animation-duration:{3.2 + (i % 5) * 0.7:.1f}s;'
+            f'animation-delay:{(i % 7) * 0.4:.1f}s;" alt="">'
         )
 
-    st.markdown(
-        f'<div class="scene" style="height:{height_vh}vh;">'
-        f'<div class="scene-bg"></div>'
-        f'{"".join(layers)}</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(f'<div class="backdrop">{"".join(layers)}</div>', unsafe_allow_html=True)
     return items
 
 
@@ -522,7 +538,7 @@ def page_tree(key):
 
     number = st.text_input("번호", max_chars=2, placeholder="예: 7", key=f"t_num_{key}").strip()
 
-    # 미리보기용 임시 배치
+    # 미리보기용 임시 배치 — 배경에 흐리게 얹힙니다
     preview = None
     if number.isdigit():
         item = st.session_state.get(f"g_item_{key}")
@@ -532,8 +548,7 @@ def page_tree(key):
                 "x": st.session_state.get(f"g_x_{key}", 50),
                 "y": st.session_state.get(f"g_y_{key}", 80),
             }
-
-    render_scene(key, extra=preview)
+    st.session_state["_preview"] = preview
 
     if not number.isdigit():
         st.caption("번호를 넣으면 꽃을 놓을 수 있어요.")
@@ -616,6 +631,9 @@ def page_open():
         st.session_state.idx = -1
 
     c = cfg(key)
+    # 개봉 화면 배경 = 그 반이 꾸민 농장. 나무는 다 자란 모습으로 고정합니다.
+    render_backdrop(key, stage=3)
+
     letters = load_letters(key)
     if not letters:
         st.markdown(f'<div class="paper center">{c["name"]}은 아직 편지가 없어요.</div>', unsafe_allow_html=True)
@@ -698,13 +716,7 @@ def main():
 
     at_start = not key and not teacher
 
-    if teacher:
-        stage_file = STAGES[3]
-    elif key:
-        stage_file = STAGES[stage_index(key)]
-    else:
-        stage_file = STAGES[0]
-    inject_css(stage_file, intro=at_start)
+    inject_css(BG_FILE, intro=at_start)
 
     # 시작 화면 — 아이콘이 먼저 뜨고 배경이 뒤따릅니다
     if at_start:
@@ -730,6 +742,8 @@ def main():
     if teacher:
         page_open()
         return
+
+    render_backdrop(key, extra=st.session_state.get("_preview"))
 
     if st.session_state.get("just_saved"):
         num = st.session_state.pop("just_saved")
