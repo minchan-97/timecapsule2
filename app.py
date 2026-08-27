@@ -400,10 +400,7 @@ def inject_css(stage_file, intro=False):
   }}
   /* 배경은 맨 뒤, 본문은 그 위. 그리는 순서에만 기대지 않도록 못을 박습니다. */
   .block-container {{position: relative; z-index: 1;}}
-  [data-testid="stVerticalBlock"],
-  [data-testid="stHorizontalBlock"],
-  [data-testid="stElementContainer"],
-  [data-testid="stForm"] {{position: relative; z-index: 1;}}
+  [data-testid="stMain"] {{position: relative; z-index: 1;}}
   @keyframes veilOut {{from {{opacity: 1;}} to {{opacity: 0;}}}}
 
   /* 시작 화면 아이콘 */
@@ -1012,10 +1009,18 @@ def main():
         return
 
     play_music()
-    tab1, tab2 = st.tabs(["편지 쓰기", "우리 농장"])
-    with tab1:
+
+    # 탭 대신 라디오. 탭은 안쪽이 숨겨진 채로 그려져서 화면에 따라 안 보일 수 있습니다.
+    mode = st.radio(
+        "무엇을 할까요",
+        ["편지 쓰기", "우리 농장"],
+        horizontal=True,
+        key="stu_mode",
+        label_visibility="collapsed",
+    )
+    if mode == "편지 쓰기":
         page_write(key)
-    with tab2:
+    else:
         page_tree(key)
 
 
