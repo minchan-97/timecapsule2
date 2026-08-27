@@ -101,10 +101,35 @@ def cuts(key):
 #   SUPABASE_URL = "https://xxxx.supabase.co"
 #   SUPABASE_KEY = "eyJ..."
 # ─────────────────────────────────────────────────────────────
+def normalize_url(raw):
+    """붙여넣기 실수를 최대한 흡수해 프로젝트 기본 주소만 남깁니다.
+
+    받아들이는 형태:
+      https://abcd.supabase.co
+      https://abcd.supabase.co/            (끝 슬래시)
+      https://abcd.supabase.co/rest/v1     (Data API 주소를 그대로 붙여넣은 경우)
+      https://supabase.com/dashboard/project/abcd   (대시보드 주소)
+      abcd.supabase.co                     (https 없음)
+    """
+    u = (raw or "").strip().strip('"').strip("'")
+    if not u:
+        return ""
+    if "/dashboard/project/" in u:                       # 대시보드 주소
+        ref = u.split("/dashboard/project/")[1].split("/")[0].split("?")[0]
+        return f"https://{ref}.supabase.co"
+    if not u.startswith("http"):
+        u = "https://" + u
+    u = u.split("?")[0].rstrip("/")
+    for tail in ("/rest/v1", "/rest", "/auth/v1", "/storage/v1"):
+        if u.endswith(tail):
+            u = u[: -len(tail)]
+    return u.rstrip("/")
+
+
 def sb_conf():
     try:
-        url = st.secrets["SUPABASE_URL"].rstrip("/")
-        key = st.secrets["SUPABASE_KEY"]
+        url = normalize_url(st.secrets["SUPABASE_URL"])
+        key = str(st.secrets["SUPABASE_KEY"]).strip().strip('"').strip("'")
     except Exception:
         return None
     if not url or not key:
@@ -127,12 +152,18 @@ class SupabaseError(RuntimeError):
 
     def __init__(self, action, table, status, body):
         self.status, self.body = status, body
-        hint = {
-            401: "키가 틀렸거나 만료됐습니다. service_role 키가 맞는지 확인하세요.",
-            403: "권한이 없습니다. anon 키 대신 service_role 키를 쓰세요.",
-            404: f"'{table}' 표가 없습니다. SUPABASE.md 의 SQL 을 실행했는지 확인하세요.",
-            409: "같은 값이 이미 있습니다.",
-        }.get(status, "")
+        if "PGRST125" in body or "Invalid path" in body:
+            hint = ("SUPABASE_URL 이 잘못됐습니다. 프로젝트 기본 주소만 넣으세요. "
+                    "예: https://abcd.supabase.co (뒤에 /rest/v1 을 붙이지 마세요)")
+        elif "PGRST205" in body or "does not exist" in body:
+            hint = f"'{table}' 표가 없습니다. SUPABASE.md 의 SQL 을 실행했는지 확인하세요."
+        else:
+            hint = {
+                401: "키가 틀렸거나 만료됐습니다. service_role 키가 맞는지 확인하세요.",
+                403: "권한이 없습니다. anon 키 대신 service_role 키를 쓰세요.",
+                404: "주소나 표 이름을 확인하세요.",
+                409: "같은 값이 이미 있습니다.",
+            }.get(status, "")
         super().__init__(f"[{action} {table}] HTTP {status} {hint}\n{body[:300]}")
 
 
@@ -200,6 +231,31 @@ def _write(table, class_key, row):
         with open(DATA_DIR / f"{table}_{class_key}.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     _read.clear()
+
+
+TREE_EXPECT = {"tree_s.webp": (73, 126), "tree_m.webp": (279, 366), "tree_l.webp": (503, 497)}
+
+
+@st.cache_data(show_spinner=False)
+def assets_ok():
+    """static 폴더가 app.py 와 같은 세대인지 확인합니다.
+
+    옛 그림 파일이 섞여 있으면 TREES 좌표와 어긋나 나무가 공중에 뜹니다.
+    """
+    bad = []
+    for name, size in TREE_EXPECT.items():
+        path = STATIC / name
+        if not path.exists():
+            bad.append(f"{name} 없음")
+            continue
+        try:
+            from PIL import Image
+            got = Image.open(path).size
+            if got != size:
+                bad.append(f"{name} 크기 {got} (기대 {size})")
+        except Exception:
+            pass
+    return bad
 
 
 def storage_label():
@@ -421,8 +477,9 @@ def inject_css(stage_file, intro=False):
   .stTextArea textarea {{font-family: 'Gaegu', cursive; font-size: 1.25rem; line-height: 1.9;}}
   /* 농장 배경 — 화면 전체 */
   .backdrop {{
-    position: fixed; inset: 0; z-index: 0;
-    pointer-events: none; overflow: hidden;
+    position: fixed; top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: 0; pointer-events: none; overflow: hidden;
   }}
   /* 그림판 — 화면을 덮되 그림 비율을 유지합니다.
      나무와 꽃의 %좌표가 이 판을 기준으로 하므로, 화면 비율이 바뀌어도
@@ -430,13 +487,21 @@ def inject_css(stage_file, intro=False):
   .canvas {{
     position: absolute; top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    width: 100%; height: auto;
-    aspect-ratio: {BG_RATIO};
+    /* 화면을 덮으면서 그림 비율(1400:788)을 정확히 유지합니다.
+       aspect-ratio 나 미디어쿼리에 기대지 않아 브라우저를 가리지 않습니다. */
+    width:  max(100vw, calc(100vh * 1400 / 788));
+    height: max(100vh, calc(100vw * 788 / 1400));
     background-image: url("{bg}");
     background-size: 100% 100%;
+    background-repeat: no-repeat;
   }}
-  @media (max-aspect-ratio: {BG_RATIO}) {{
-    .canvas {{width: auto; height: 100%;}}
+  /* 모바일 주소창 때문에 100vh 가 실제 화면보다 큰 문제를 보정합니다 */
+  @supports (height: 100dvh) {{
+    .backdrop {{height: 100dvh;}}
+    .canvas {{
+      width:  max(100vw, calc(100dvh * 1400 / 788));
+      height: max(100dvh, calc(100vw * 788 / 1400));
+    }}
   }}
   .canvas img {{position: absolute;}}
   .tree {{
@@ -468,6 +533,12 @@ def inject_css(stage_file, intro=False):
     50%      {{transform: translate(-50%, -50%) translate(16px, -12px) rotate(3deg);}}
   }}
   .ghost {{opacity: 0.55;}}
+  /* 정렬 확인용 — 판의 테두리와 언덕선(82.3%) 을 그려 봅니다 */
+  .canvas.guide {{outline: 3px dashed rgba(220,60,60,0.9); outline-offset: -3px;}}
+  .canvas.guide::after {{
+    content: ""; position: absolute; left: 0; right: 0; top: 82.3%;
+    border-top: 2px solid rgba(220,60,60,0.9);
+  }}
   @media (prefers-reduced-motion: reduce) {{
     .deco, .tree {{animation: none !important;}}
   }}
@@ -504,7 +575,7 @@ def esc(s):
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def render_backdrop(key, extra=None, stage=None):
+def render_backdrop(key, extra=None, stage=None, guide=False):
     """화면 전체를 그 반의 농장으로 만듭니다.
 
     배경 그림(나무 없음) 위에 나무 레이어와 꾸민 것들을 얹습니다.
@@ -539,8 +610,9 @@ def render_backdrop(key, extra=None, stage=None):
             f'animation-delay:{(i % 7) * 0.4:.1f}s;" alt="">'
         )
 
+    cls = "canvas guide" if guide else "canvas"
     st.markdown(
-        f'<div class="backdrop"><div class="canvas">{"".join(layers)}</div></div>',
+        f'<div class="backdrop"><div class="{cls}">{"".join(layers)}</div></div>',
         unsafe_allow_html=True,
     )
     return items
@@ -745,8 +817,15 @@ def page_open():
             for t, m in bad.items():
                 st.code(m, language=None)
             st.caption("SUPABASE.md 의 2단계(표 만들기)와 4단계(Secrets)를 다시 확인하세요.")
+            st.caption(f"실제로 부른 주소: `{sb_conf()[0]}/rest/v1/letters`")
         else:
-            st.caption("Supabase 연결 정상")
+            st.caption(f"Supabase 연결 정상 · {sb_conf()[0]}")
+
+    stale = assets_ok()
+    if stale:
+        st.error("static 폴더가 옛 버전입니다. 나무 위치가 어긋납니다.")
+        st.code("\n".join(stale), language=None)
+        st.caption("압축파일의 static 폴더로 통째로 교체한 뒤 다시 배포하세요.")
 
     picked = st.selectbox("반", labels, key="open_class")
     key = keys[labels.index(picked)]
@@ -758,8 +837,11 @@ def page_open():
         st.session_state.idx = -1
 
     c = cfg(key)
+    guide = st.checkbox("정렬 확인", key="guide_on",
+                        help="빨간 테두리는 그림판, 빨간 가로선은 언덕선입니다. "
+                             "선이 언덕 위에 놓이고 나무 밑동이 그 선에 닿으면 정상입니다.")
     # 개봉 화면 배경 = 그 반이 꾸민 농장. 나무는 다 자란 모습으로 고정합니다.
-    render_backdrop(key, stage=3)
+    render_backdrop(key, stage=3, guide=guide)
 
     try:
         letters = load_letters(key)
