@@ -122,6 +122,20 @@ def sb_headers():
     }
 
 
+class SupabaseError(RuntimeError):
+    """상태 코드와 서버 설명을 그대로 담습니다. 원인 파악이 훨씬 빨라집니다."""
+
+    def __init__(self, action, table, status, body):
+        self.status, self.body = status, body
+        hint = {
+            401: "키가 틀렸거나 만료됐습니다. service_role 키가 맞는지 확인하세요.",
+            403: "권한이 없습니다. anon 키 대신 service_role 키를 쓰세요.",
+            404: f"'{table}' 표가 없습니다. SUPABASE.md 의 SQL 을 실행했는지 확인하세요.",
+            409: "같은 값이 이미 있습니다.",
+        }.get(status, "")
+        super().__init__(f"[{action} {table}] HTTP {status} {hint}\n{body[:300]}")
+
+
 def sb_select(table, class_key):
     url, _ = sb_conf()
     r = requests.get(
@@ -130,7 +144,8 @@ def sb_select(table, class_key):
         params={"class_key": f"eq.{class_key}", "select": "*", "order": "id.asc"},
         timeout=10,
     )
-    r.raise_for_status()
+    if r.status_code >= 400:
+        raise SupabaseError("읽기", table, r.status_code, r.text)
     return r.json()
 
 
@@ -140,7 +155,21 @@ def sb_insert(table, row):
         f"{url}/rest/v1/{table}", headers=sb_headers(), json=row, timeout=10
     )
     if r.status_code >= 400:
-        raise RuntimeError(f"{r.status_code} {r.text[:200]}")
+        raise SupabaseError("쓰기", table, r.status_code, r.text)
+
+
+def sb_check():
+    """두 표를 실제로 한 번씩 읽어 보고 결과를 돌려줍니다."""
+    out = {}
+    for t in ("letters", "garden"):
+        try:
+            sb_select(t, "__check__")
+            out[t] = (True, "정상")
+        except SupabaseError as e:
+            out[t] = (False, str(e))
+        except Exception as e:
+            out[t] = (False, f"{type(e).__name__}: {e}")
+    return out
 
 
 # 매 조작마다 서버를 부르지 않도록 잠깐 캐시합니다. 쓰기 직후에는 비웁니다.
@@ -178,8 +207,13 @@ def storage_label():
 
 
 # ── 편지 ──────────────────────────────────────────────────────
-def load_letters(key):
-    return _read("letters", key)
+def load_letters(key, safe=False):
+    try:
+        return _read("letters", key)
+    except Exception:
+        if safe:
+            return []
+        raise
 
 
 def save_letter(key, record):
@@ -197,18 +231,23 @@ def find_letter(key, number):
 #
 # 지우기는 아이들도 할 수 있지만, 기록이 사라지지는 않습니다.
 # 지움도 하나의 기록으로 덧붙습니다. 그래서 언제든 되돌릴 수 있습니다.
-def garden_log(key):
-    return _read("garden", key)
+def garden_log(key, safe=False):
+    try:
+        return _read("garden", key)
+    except Exception:
+        if safe:
+            return []
+        raise
 
 
 def garden_append(key, event):
     _write("garden", key, event)
 
 
-def garden_state(key, log=None):
+def garden_state(key, log=None, safe=False):
     """기록을 처음부터 재생해서 지금 화면에 보일 것만 남깁니다."""
     placed = {}
-    for e in (garden_log(key) if log is None else log):
+    for e in (garden_log(key, safe=safe) if log is None else log):
         if e.get("op") == "add":
             placed[e["event_id"]] = e
         elif e.get("op") == "remove":
@@ -482,7 +521,7 @@ def render_backdrop(key, extra=None, stage=None):
             f'--sway:{t["sway"]}deg;animation-duration:{t["dur"]}s;" alt="">'
         )
 
-    items = garden_state(key)
+    items = garden_state(key, safe=True)
     if extra:
         items = items + [extra]
     for i, e in enumerate(items):
@@ -698,6 +737,17 @@ def page_open():
             "지금은 임시 저장(로컬 파일)입니다. 앱이 잠들거나 재배포되면 "
             "편지와 꾸민 것이 모두 사라집니다. Supabase 를 설정해 주세요."
         )
+    else:
+        checks = sb_check()
+        bad = {t: m for t, (ok, m) in checks.items() if not ok}
+        if bad:
+            st.error("Supabase 연결에 문제가 있습니다.")
+            for t, m in bad.items():
+                st.code(m, language=None)
+            st.caption("SUPABASE.md 의 2단계(표 만들기)와 4단계(Secrets)를 다시 확인하세요.")
+        else:
+            st.caption("Supabase 연결 정상")
+
     picked = st.selectbox("반", labels, key="open_class")
     key = keys[labels.index(picked)]
 
@@ -711,7 +761,12 @@ def page_open():
     # 개봉 화면 배경 = 그 반이 꾸민 농장. 나무는 다 자란 모습으로 고정합니다.
     render_backdrop(key, stage=3)
 
-    letters = load_letters(key)
+    try:
+        letters = load_letters(key)
+    except SupabaseError as err:
+        st.error("편지를 불러오지 못했습니다.")
+        st.code(str(err), language=None)
+        return
     if not letters:
         st.markdown(f'<div class="paper center">{c["name"]}은 아직 편지가 없어요.</div>', unsafe_allow_html=True)
         return
@@ -851,4 +906,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SupabaseError as err:
+        # 빨간 추적문 대신 무엇이 잘못됐는지 그대로 보여 줍니다
+        st.error("저장소에 연결하지 못했습니다.")
+        st.code(str(err), language=None)
+        st.caption(
+            "SUPABASE.md 의 2단계(표 만들기)와 4단계(Secrets)를 확인하세요. "
+            "고치는 동안 아이들에게는 편지를 쓰지 않도록 안내해 주세요."
+        )
