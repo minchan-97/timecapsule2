@@ -46,26 +46,30 @@ BG_FILE     = "base_wide.jpg"   # 나무 없는 하늘·언덕·팻말
 
 # 나무는 배경에서 떼어낸 별도 레이어입니다. 그래야 바람에 흔들 수 있습니다.
 # 값은 배경 그림 안에서의 위치(%)로, 원래 그려져 있던 자리 그대로입니다.
+# w, h 는 모두 그림판(1400x788) 대비 %입니다.
+# 높이를 브라우저의 자동 계산(height:auto)에 맡기면 다른 CSS 에 영향을 받아
+# 나무가 뜨거나 눌립니다. 그래서 세로도 직접 지정합니다.
 TREES = [
     None,
-    {"f": "tree_s.webp", "left": 47.20, "top": 57.91, "w": 5.21,  "sway": 1.6, "dur": 4.5},
-    {"f": "tree_m.webp", "left": 46.92, "top": 31.80, "w": 19.93, "sway": 0.9, "dur": 6.5},
-    {"f": "tree_l.webp", "left": 33.54, "top": 19.25, "w": 35.93, "sway": 0.6, "dur": 8.0},
+    {"f": "tree_s.webp", "left": 47.20, "top": 57.91, "w": 5.21,  "h": 15.99, "sway": 1.6, "dur": 4.5},
+    {"f": "tree_m.webp", "left": 46.92, "top": 31.80, "w": 19.93, "h": 46.45, "sway": 0.9, "dur": 6.5},
+    {"f": "tree_l.webp", "left": 33.54, "top": 19.25, "w": 35.93, "h": 63.07, "sway": 0.6, "dur": 8.0},
 ]
 
 BG_RATIO = "1400 / 788"   # 배경 그림 비율. 나무·꽃 좌표가 이 판 위에서 계산됩니다.
 STAGE_LABEL = ["아직 아무것도", "묘목", "자라는 중", "큰 나무"]
 
 # 꾸미기 아이템 — sky=하늘에 뜨는 것, ground=땅에 놓는 것
+# r = 세로%/가로% (그림 원본 비율에서 나온 값). 세로를 직접 지정하기 위한 값입니다.
 ITEMS = {
-    "delphinium": {"label": "파란 꽃",  "zone": "ground", "w": 9},
-    "poppy":      {"label": "주황 꽃",  "zone": "ground", "w": 11},
-    "daisy":      {"label": "노란 꽃",  "zone": "ground", "w": 9},
-    "clover":     {"label": "클로버",   "zone": "ground", "w": 6},
-    "grass":      {"label": "풀과 돌",  "zone": "ground", "w": 20},
-    "bush":       {"label": "덤불",     "zone": "ground", "w": 20},
-    "butterfly":  {"label": "나비",     "zone": "sky",    "w": 8},
-    "bird":       {"label": "새",       "zone": "sky",    "w": 11},
+    "delphinium": {"label": "파란 꽃",  "zone": "ground", "w": 9,  "r": 3.525},
+    "poppy":      {"label": "주황 꽃",  "zone": "ground", "w": 11, "r": 1.925},
+    "daisy":      {"label": "노란 꽃",  "zone": "ground", "w": 9,  "r": 2.603},
+    "clover":     {"label": "클로버",   "zone": "ground", "w": 6,  "r": 1.893},
+    "grass":      {"label": "풀과 돌",  "zone": "ground", "w": 20, "r": 1.332},
+    "bush":       {"label": "덤불",     "zone": "ground", "w": 20, "r": 1.155},
+    "butterfly":  {"label": "나비",     "zone": "sky",    "w": 8,  "r": 2.520},
+    "bird":       {"label": "새",       "zone": "sky",    "w": 11, "r": 2.107},
 }
 
 MAX_PER_STUDENT = 3   # 한 사람이 놓을 수 있는 개수
@@ -508,7 +512,15 @@ def inject_css(stage_file, intro=False):
       height: max(100dvh, calc(100vw * 788 / 1400));
     }}
   }}
-  .canvas img {{position: absolute;}}
+  /* Streamlit 의 전역 img 규칙이 크기를 바꾸지 못하게 막습니다 */
+  .canvas img {{
+    position: absolute;
+    max-width: none !important;
+    max-height: none !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    object-fit: fill;
+  }}
   .tree {{
     transform-origin: 50% 100%;
     filter: drop-shadow(0 4px 8px rgba(90,70,40,0.10));
@@ -593,7 +605,8 @@ def render_backdrop(key, extra=None, stage=None, guide=False):
     if t:
         layers.append(
             f'<img class="tree" src="{asset_url(t["f"])}" '
-            f'style="left:{t["left"]}%;top:{t["top"]}%;width:{t["w"]}%;'
+            f'style="left:{t["left"]}%;top:{t["top"]}%;'
+            f'width:{t["w"]}%;height:{t["h"]}%;'
             f'--sway:{t["sway"]}deg;animation-duration:{t["dur"]}s;" alt="">'
         )
 
@@ -610,7 +623,8 @@ def render_backdrop(key, extra=None, stage=None, guide=False):
         ghost = " ghost" if e.get("event_id") == "_preview" else ""
         layers.append(
             f'<img class="deco {cls}{ghost}" src="{asset_url("items/" + e["item"] + ".webp")}" '
-            f'style="left:{e["x"]}%;top:{e["y"]}%;width:{w:.1f}%;'
+            f'style="left:{e["x"]}%;top:{e["y"]}%;'
+            f'width:{w:.2f}%;height:{w * meta["r"]:.2f}%;'
             f'animation-duration:{3.2 + (i % 5) * 0.7:.1f}s;'
             f'animation-delay:{(i % 7) * 0.4:.1f}s;" alt="">'
         )
