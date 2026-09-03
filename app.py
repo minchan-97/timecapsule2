@@ -56,6 +56,24 @@ TREES = [
     {"f": "tree_l.webp", "left": 33.54, "top": 19.25, "w": 35.93, "h": 63.07, "sway": 0.6, "dur": 8.0},
 ]
 
+# ── 번호별 개인 나무 ──────────────────────────────────────────
+# 편지를 넣는 순간 그 아이의 나무가 심어지고, 쓴 날부터 자랍니다.
+# r = 세로%/가로% (그림 원본 비율). 어디에 놓든 모양이 안 망가집니다.
+TREE_KINDS = {
+    "s": {"f": "tree_s.webp", "r": 3.0665, "sway": 1.6, "dur": 4.6},
+    "m": {"f": "tree_m.webp", "r": 2.3307, "sway": 1.0, "dur": 6.4},
+    "l": {"f": "tree_l.webp", "r": 1.7555, "sway": 0.6, "dur": 8.2},
+}
+TREE_CUTS = (3, 8)      # 0~2주 묘목 / 3~7주 자라는 중 / 8주~ 큰 나무
+MY_TREE_W = 21.0        # 내 나무 가로 (캔버스 %)
+OTHER_TREE_W = 7.0      # 다른 아이 나무 가로
+
+# ── 나무 돌보기 ───────────────────────────────────────────────
+WATER_PER_DAY = 1       # 하루에 줄 수 있는 물
+WATER_TO_WEEK = 3       # 물 3번 = 1주 더 자란 효과
+WATER_BONUS_MAX = 4     # 물로 앞당길 수 있는 최대 주수
+FRUIT_PER_WATER = 2     # 물 2번마다 열매 1개
+
 BG_RATIO = "1400 / 788"   # 배경 그림 비율. 나무·꽃 좌표가 이 판 위에서 계산됩니다.
 STAGE_LABEL = ["아직 아무것도", "묘목", "자라는 중", "큰 나무"]
 
@@ -315,12 +333,49 @@ def garden_state(key, log=None, safe=False):
     return list(placed.values())
 
 
-def garden_place(key, number, item, x, y):
+def care_log(key, number):
+    """그 아이의 돌보기 기록만 셉니다. 편지·꾸미기와 같은 기록장을 씁니다."""
+    waters, fruits, last = 0, 0, None
+    for e in garden_log(key, safe=True):
+        if str(e.get("number")) != str(number):
+            continue
+        if e.get("op") == "water":
+            waters += 1
+            last = max(last or "", e.get("at", ""))
+        elif e.get("op") == "fruit":
+            fruits += 1
+    return {"waters": waters, "fruits": fruits, "last": last}
+
+
+def watered_today(key, number):
+    last = care_log(key, number)["last"]
+    return bool(last) and last[:10] == date.today().isoformat()
+
+
+def water_bonus_weeks(waters):
+    return min(WATER_BONUS_MAX, waters // WATER_TO_WEEK)
+
+
+def fruits_ready(key, number, kind):
+    if kind != "l":
+        return 0
+    c = care_log(key, number)
+    return max(0, c["waters"] // FRUIT_PER_WATER - c["fruits"])
+
+
+def care_action(key, number, op):
+    garden_append(key, {
+        "op": op, "event_id": f"{op}-{number}-{int(datetime.now().timestamp()*1000)}",
+        "number": number, "at": datetime.now().isoformat(timespec="seconds"),
+    })
+
+
+def garden_place(key, number, item, x, y, flip=False):
     # 같은 밀리초에 두 개를 놓으면 id가 겹쳐 하나가 사라집니다. 난수를 붙입니다.
     eid = f"{number}-{int(datetime.now().timestamp()*1000)}-{random.randrange(1<<24):06x}"
     garden_append(key, {
         "op": "add", "event_id": eid, "number": number, "item": item,
-        "x": round(x, 1), "y": round(y, 1),
+        "x": round(x, 1), "y": round(y, 1), "flip": bool(flip),
         "at": datetime.now().isoformat(timespec="seconds"),
     })
     return eid
@@ -331,6 +386,60 @@ def garden_remove(key, eid, by):
         "op": "remove", "event_id": eid, "by": by,
         "at": datetime.now().isoformat(timespec="seconds"),
     })
+
+
+def personal_trees(key, me=None):
+    """편지 한 통이 나무 한 그루입니다. 별도 저장 없이 편지에서 바로 만듭니다.
+
+    - 자라는 정도는 그 아이가 편지를 쓴 날부터 셉니다.
+    - 자리는 번호 순으로 언덕에 고르게 나누고, 번호에서 만든 값으로 조금씩 흩습니다.
+    - me 와 같은 번호면 가운데 크게 놓습니다.
+    """
+    letters = load_letters(key, safe=True)
+    if not letters:
+        return []
+
+    def num(r):
+        try:
+            return int(r["number"])
+        except (TypeError, ValueError):
+            return 0
+
+    letters = sorted(letters, key=num)
+    n = len(letters)
+    out = []
+    for i, r in enumerate(letters):
+        planted = datetime.fromisoformat(r["written_at"]).date()
+        raw = max(0, (date.today() - planted).days // 7)
+        bonus = water_bonus_weeks(care_log(key, r["number"])["waters"])
+        weeks = raw + bonus
+        kind = "l" if weeks >= TREE_CUTS[1] else ("m" if weeks >= TREE_CUTS[0] else "s")
+        k = TREE_KINDS[kind]
+
+        mine = me is not None and str(r["number"]) == str(me)
+        seed = (num(r) * 2654435761) % 1000       # 번호에서 만든 고정 난수
+
+        if mine:
+            x, ground, w = 50.0, 84.0, MY_TREE_W
+        else:
+            # 8~92% 를 균등 분할하고 칸 안에서만 흔듭니다.
+            slot = 84.0 / max(1, n)
+            x = 8.0 + slot * (i + 0.5) + (seed % 100 - 50) / 100 * slot * 0.4
+            depth = seed % 3                       # 앞뒤 세 겹으로 흩어 놓기
+            ground = (76.0, 80.5, 85.0)[depth]
+            # 그루가 많으면 자동으로 작아집니다. 30명이어도 빽빽해지지 않습니다.
+            base_w = min(OTHER_TREE_W, slot * 1.5)
+            w = base_w * (0.85, 1.0, 1.15)[depth]
+
+        out.append({
+            "f": k["f"], "r": k["r"], "sway": k["sway"], "dur": k["dur"],
+            "x": round(x, 2), "ground": ground, "w": round(w, 2),
+            "mine": mine, "number": r["number"], "nickname": r.get("nickname", ""),
+            "weeks": weeks, "raw_weeks": raw, "bonus": bonus, "kind": kind,
+        })
+    # 내 나무를 마지막에 그려 맨 앞에 오게 합니다
+    out.sort(key=lambda t: (t["mine"], t["ground"]))
+    return out
 
 
 def garden_count(key, number):
@@ -400,10 +509,7 @@ def inject_css(stage_file, intro=False):
   }}
   /* 배경은 맨 뒤, 본문은 그 위. 그리는 순서에만 기대지 않도록 못을 박습니다. */
   .block-container {{position: relative; z-index: 1;}}
-  [data-testid="stVerticalBlock"],
-  [data-testid="stHorizontalBlock"],
-  [data-testid="stElementContainer"],
-  [data-testid="stForm"] {{position: relative; z-index: 1;}}
+  [data-testid="stMain"] {{position: relative; z-index: 1;}}
   @keyframes veilOut {{from {{opacity: 1;}} to {{opacity: 0;}}}}
 
   /* 시작 화면 아이콘 */
@@ -521,16 +627,18 @@ def inject_css(stage_file, intro=False):
     min-height: 0 !important;
     object-fit: fill;
   }}
-  .tree {{
+  /* 개인 나무 — 밑동을 땅에 붙이고 그 점을 축으로 흔듭니다 */
+  .ptree {{
     transform-origin: 50% 100%;
     filter: drop-shadow(0 4px 8px rgba(90,70,40,0.10));
     animation-name: treeSway;
     animation-iteration-count: infinite;
     animation-timing-function: ease-in-out;
   }}
+  .ptree.mine {{filter: drop-shadow(0 6px 14px rgba(90,70,40,0.22));}}
   @keyframes treeSway {{
-    0%, 100% {{transform: rotate(calc(var(--sway) * -1));}}
-    50%      {{transform: rotate(var(--sway));}}
+    0%, 100% {{transform: translate(-50%, -100%) rotate(calc(var(--sway) * -1));}}
+    50%      {{transform: translate(-50%, -100%) rotate(var(--sway));}}
   }}
   .deco {{
     transform-origin: 50% 100%;
@@ -541,15 +649,54 @@ def inject_css(stage_file, intro=False):
   }}
   .deco.swayA {{animation-name: swayA;}}
   .deco.flyA {{animation-name: flyA; transform-origin: 50% 50%;}}
+  /* --fx 가 -1 이면 좌우로 뒤집힙니다 (나비·새가 반대편을 보게) */
   @keyframes swayA {{
-    0%, 100% {{transform: translate(-50%, -100%) rotate(-2.2deg);}}
-    50%      {{transform: translate(-50%, -100%) rotate(2.2deg);}}
+    0%, 100% {{transform: translate(-50%, -100%) scaleX(var(--fx, 1)) rotate(-2.2deg);}}
+    50%      {{transform: translate(-50%, -100%) scaleX(var(--fx, 1)) rotate(2.2deg);}}
   }}
   @keyframes flyA {{
-    0%, 100% {{transform: translate(-50%, -50%) translate(0, 0) rotate(-3deg);}}
-    50%      {{transform: translate(-50%, -50%) translate(16px, -12px) rotate(3deg);}}
+    0%, 100% {{transform: translate(-50%, -50%) translate(0, 0) scaleX(var(--fx, 1)) rotate(-3deg);}}
+    50%      {{transform: translate(-50%, -50%) translate(16px, -12px) scaleX(var(--fx, 1)) rotate(3deg);}}
   }}
   .ghost {{opacity: 0.55;}}
+  /* 돌보기 반응 — 물방울, 낙엽, 열매 */
+  .drop, .leaf, .fruit {{position: absolute; pointer-events: none;}}
+  .drop {{
+    width: 0.55%; height: 1.6%;
+    background: rgba(120,180,225,0.85);
+    border-radius: 50% 50% 60% 60%;
+    animation: dropFall 1.5s ease-in forwards;
+  }}
+  @keyframes dropFall {{
+    0%   {{opacity: 0; transform: translateY(0) scaleY(0.6);}}
+    15%  {{opacity: 1;}}
+    100% {{opacity: 0; transform: translateY(var(--fall)) scaleY(1.3);}}
+  }}
+  .leaf {{
+    width: 1%; height: 1.4%;
+    background: rgba(126,160,82,0.9);
+    border-radius: 50% 0 50% 0;
+    animation: leafFall 2.6s ease-in forwards;
+  }}
+  @keyframes leafFall {{
+    0%   {{opacity: 0; transform: translate(0,0) rotate(0deg);}}
+    12%  {{opacity: 1;}}
+    100% {{opacity: 0; transform: translate(3vw, var(--fall)) rotate(420deg);}}
+  }}
+  .fruit {{
+    width: 1.1%; height: 2%;
+    background: radial-gradient(circle at 35% 30%, #f6a15a, #d9533a);
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(90,50,30,0.3);
+    animation: fruitBob 3.4s ease-in-out infinite;
+  }}
+  @keyframes fruitBob {{
+    0%, 100% {{transform: translateY(0);}}
+    50%      {{transform: translateY(0.6%);}}
+  }}
+  @media (prefers-reduced-motion: reduce) {{
+    .fruit {{animation: none !important;}}
+  }}
   /* 정렬 확인용 — 판의 테두리와 언덕선(82.3%) 을 그려 봅니다 */
   .canvas.guide {{outline: 3px dashed rgba(220,60,60,0.9); outline-offset: -3px;}}
   .canvas.guide::after {{
@@ -557,7 +704,10 @@ def inject_css(stage_file, intro=False):
     border-top: 2px solid rgba(220,60,60,0.9);
   }}
   @media (prefers-reduced-motion: reduce) {{
-    .deco, .tree {{animation: none !important;}}
+    .deco {{animation: none !important;
+            transform: translate(-50%, -100%) scaleX(var(--fx, 1)) !important;}}
+    .deco.flyA {{transform: translate(-50%, -50%) scaleX(var(--fx, 1)) !important;}}
+    .ptree {{animation: none !important; transform: translate(-50%, -100%) !important;}}
   }}
 """
     # 빈 줄이 하나라도 있으면 Streamlit 마크다운이 HTML 블록을 끊어버려
@@ -600,14 +750,17 @@ def render_backdrop(key, extra=None, stage=None, guide=False):
     """
     layers = []
 
-    idx = stage if stage is not None else stage_index(key)
-    t = TREES[idx]
-    if t:
+    # 번호별 개인 나무. 편지 한 통이 나무 한 그루입니다.
+    me = st.session_state.get("_me")
+    for t in personal_trees(key, me=me):
+        h = t["w"] * t["r"]
+        cls = "ptree mine" if t["mine"] else "ptree"
         layers.append(
-            f'<img class="tree" src="{asset_url(t["f"])}" '
-            f'style="left:{t["left"]}%;top:{t["top"]}%;'
-            f'width:{t["w"]}%;height:{t["h"]}%;'
-            f'--sway:{t["sway"]}deg;animation-duration:{t["dur"]}s;" alt="">'
+            f'<img class="{cls}" src="{asset_url(t["f"])}" '
+            f'style="left:{t["x"]}%;top:{t["ground"]}%;'
+            f'width:{t["w"]}%;height:{h:.2f}%;'
+            f'--sway:{t["sway"]}deg;animation-duration:{t["dur"]}s;" '
+            f'alt="{esc(str(t["number"]))}번 나무">'
         )
 
     items = garden_state(key, safe=True)
@@ -621,13 +774,45 @@ def render_backdrop(key, extra=None, stage=None, guide=False):
         w = meta["w"] * scale
         cls = "flyA" if meta["zone"] == "sky" else "swayA"
         ghost = " ghost" if e.get("event_id") == "_preview" else ""
+        fx = -1 if e.get("flip") else 1          # 좌우 뒤집기
         layers.append(
             f'<img class="deco {cls}{ghost}" src="{asset_url("items/" + e["item"] + ".webp")}" '
             f'style="left:{e["x"]}%;top:{e["y"]}%;'
-            f'width:{w:.2f}%;height:{w * meta["r"]:.2f}%;'
+            f'width:{w:.2f}%;height:{w * meta["r"]:.2f}%;--fx:{fx};'
             f'animation-duration:{3.2 + (i % 5) * 0.7:.1f}s;'
             f'animation-delay:{(i % 7) * 0.4:.1f}s;" alt="">'
         )
+
+    # 방금 한 동작에 대한 반응(물방울 / 낙엽). 한 번 보여 주고 사라집니다.
+    my = [t for t in personal_trees(key, me=me) if t["mine"]] if me else []
+    if my:
+        t = my[0]
+        top = t["ground"] - t["w"] * t["r"]
+        fx_now = st.session_state.pop("_fx", None)
+        if fx_now == "water":
+            for j in range(9):
+                layers.append(
+                    f'<div class="drop" style="left:{t["x"] - 6 + j * 1.5:.1f}%;'
+                    f'top:{top - 3:.1f}%;--fall:{t["ground"] - top + 3:.1f}%;'
+                    f'animation-delay:{j * 0.12:.2f}s;"></div>'
+                )
+        elif fx_now == "shake":
+            for j in range(7):
+                layers.append(
+                    f'<div class="leaf" style="left:{t["x"] - 7 + j * 2.3:.1f}%;'
+                    f'top:{top + 10:.1f}%;--fall:{t["ground"] - top - 10:.1f}%;'
+                    f'animation-delay:{j * 0.18:.2f}s;"></div>'
+                )
+
+        # 열매 — 다 자란 내 나무에만 맺힙니다
+        for j in range(min(fruits_ready(key, me, t["kind"]), 8)):
+            gx, gy = (j * 37 % 100) / 100, (j * 53 % 100) / 100
+            layers.append(
+                f'<div class="fruit" style="'
+                f'left:{t["x"] - t["w"] * 0.3 + t["w"] * 0.6 * gx:.1f}%;'
+                f'top:{top + (t["ground"] - top) * (0.2 + 0.4 * gy):.1f}%;'
+                f'animation-delay:{j * 0.3:.1f}s;"></div>'
+            )
 
     cls = "canvas guide" if guide else "canvas"
     st.markdown(
@@ -680,6 +865,8 @@ def page_write(key):
         return
 
     number = st.text_input("번호", max_chars=2, placeholder="예: 7", key=f"w_num_{key}")
+    if number.strip().isdigit():
+        st.session_state["_me"] = number.strip()
     nickname = st.text_input("이름 또는 별명", max_chars=12, placeholder="편지 아래에 적힐 이름", key=f"w_nick_{key}")
     body = st.text_area(
         "그날의 나에게",
@@ -725,80 +912,103 @@ def page_write(key):
 # 화면 2 — 내 나무 보기
 # ─────────────────────────────────────────────────────────────
 def page_tree(key):
-    """우리 농장 — 배경을 보고, 꽃을 놓고, 자기가 놓은 것은 치울 수 있습니다."""
+    """우리 농장 — 꽃을 골라 놓고, 자기가 놓은 것은 치울 수 있습니다.
+
+    번호는 마지막에 받습니다. 먼저 고르고 움직여 보게 해야
+    화면이 비어 보이지 않습니다.
+    """
     c = cfg(key)
+    st.markdown('<div class="sky-title">우리 농장</div>', unsafe_allow_html=True)
     st.markdown(
         f'<div class="sky-sub">{c["name"]} · {weeks_elapsed(key)}주차 · '
         f'{STAGE_LABEL[stage_index(key)]} · 개봉까지 {days_left(key)}일</div>',
         unsafe_allow_html=True,
     )
 
+    names = list(ITEMS.keys())
+    labels = [ITEMS[i]["label"] for i in names]
+    picked = st.selectbox("무엇을 놓을까요", labels, key=f"g_sel_{key}")
+    item = names[labels.index(picked)]
+
+    # 슬라이더가 돌려주는 값을 그대로 씁니다.
+    # session_state 를 다시 읽으면 위젯이 아직 등록되기 전 순간에 KeyError 가 납니다.
+    zone = ITEMS[item]["zone"]
+    x = st.slider("왼쪽 ↔ 오른쪽", 5, 95, 50, key=f"g_x_{key}")
+    if zone == "ground":
+        y = st.slider("뒤쪽 ↔ 앞쪽", 68, 96, 82, key=f"g_y_{key}")
+    else:
+        y = st.slider("낮게 ↔ 높게", 20, 60, 42, key=f"g_yk_{key}")
+
+    flip = st.checkbox("좌우 뒤집기", key=f"g_flip_{key}",
+                       help="나비나 새가 반대편을 보게 합니다.")
+    st.caption("움직이면 화면 뒤에 흐리게 미리 보입니다.")
+
     number = st.text_input("번호", max_chars=2, placeholder="예: 7", key=f"t_num_{key}").strip()
 
-    # 미리보기용 임시 배치 — 배경에 흐리게 얹힙니다
-    preview = None
+    # 배경에 흐리게 얹을 미리보기
+    st.session_state["_preview"] = {
+        "event_id": "_preview", "number": number or "0", "item": item,
+        "x": x, "y": y, "flip": flip,
+    }
     if number.isdigit():
-        item = st.session_state.get(f"g_item_{key}")
-        if item:
-            preview = {
-                "event_id": "_preview", "number": number, "item": item,
-                "x": st.session_state.get(f"g_x_{key}", 50),
-                "y": st.session_state.get(f"g_y_{key}", 80),
-            }
-    st.session_state["_preview"] = preview
+        st.session_state["_me"] = number      # 내 나무를 가운데 크게 그리기 위해
 
-    if not number.isdigit():
-        st.caption("번호를 넣으면 꽃을 놓을 수 있어요.")
-        return
-
-    rec = find_letter(key, number)
-    if rec:
-        written = datetime.fromisoformat(rec["written_at"]).date()
-        st.markdown(
-            f'<div class="center" style="margin:0.8rem 0;"><span class="badge">'
-            f'{esc(rec["nickname"])}의 편지는 잘 있어요 · {(date.today()-written).days}일째'
-            f'</span></div>',
-            unsafe_allow_html=True,
-        )
-
-    mine = garden_count(key, number)
-    st.markdown(f"**꾸미기** — {mine}/{MAX_PER_STUDENT}개 놓았어요")
-
-    if mine < MAX_PER_STUDENT:
-        names = list(ITEMS.keys())
-        labels = [ITEMS[i]["label"] for i in names]
-        picked = st.selectbox("무엇을 놓을까요", labels, key=f"g_sel_{key}")
-        st.session_state[f"g_item_{key}"] = names[labels.index(picked)]
-
-        zone = ITEMS[st.session_state[f"g_item_{key}"]]["zone"]
-        st.slider("왼쪽 ↔ 오른쪽", 5, 95, key=f"g_x_{key}",
-                  value=st.session_state.get(f"g_x_{key}", 50))
-        if zone == "ground":
-            st.slider("뒤쪽 ↔ 앞쪽", 68, 96, key=f"g_y_{key}",
-                      value=st.session_state.get(f"g_y_{key}", 82))
+    if st.button("여기에 놓기", key=f"g_put_{key}"):
+        if not number.isdigit():
+            st.error("번호를 넣어 주세요.")
+        elif garden_count(key, number) >= MAX_PER_STUDENT:
+            st.error(f"한 사람이 {MAX_PER_STUDENT}개까지 놓을 수 있어요. 하나를 치우면 다시 놓을 수 있어요.")
         else:
-            st.slider("낮게 ↔ 높게", 20, 60, key=f"g_y_{key}",
-                      value=st.session_state.get(f"g_y_{key}", 42))
-
-        if st.button("여기에 놓기", key=f"g_put_{key}"):
             try:
-                garden_place(key, number,
-                             st.session_state[f"g_item_{key}"],
-                             st.session_state[f"g_x_{key}"],
-                             st.session_state[f"g_y_{key}"])
+                garden_place(key, number, item, x, y, flip)
             except Exception as err:
                 st.error("놓지 못했어요. 잠시 뒤에 다시 해 보세요.")
                 st.exception(err)
                 return
             st.rerun()
-    else:
-        st.caption(f"한 사람이 {MAX_PER_STUDENT}개까지 놓을 수 있어요. 하나를 치우면 다시 놓을 수 있어요.")
 
-    # 자기가 놓은 것만 치울 수 있습니다
-    own = [e for e in garden_state(key) if e["number"] == number]
-    if own:
-        st.markdown("**내가 놓은 것**")
-        for e in own:
+    if number.isdigit():
+        my = [t for t in personal_trees(key, me=number) if t["mine"]]
+        if my:
+            t = my[0]
+            label = {"s": "묘목", "m": "자라는 중", "l": "큰 나무"}[t["kind"]]
+            care = care_log(key, number)
+            extra = f" · 물로 +{t['bonus']}주" if t["bonus"] else ""
+            st.markdown(
+                f'<div class="center" style="margin:0.6rem 0;"><span class="badge">'
+                f'{number}번 나무 · {label} · 심은 지 {t["raw_weeks"]}주{extra}</span></div>',
+                unsafe_allow_html=True,
+            )
+
+            ready = fruits_ready(key, number, t["kind"])
+            b1, b2, b3 = st.columns(3)
+            with b1:
+                done = watered_today(key, number)
+                if st.button("물 주기" if not done else "오늘 다 줬어요",
+                             key=f"care_w_{key}", disabled=done, use_container_width=True):
+                    care_action(key, number, "water")
+                    st.session_state["_fx"] = "water"
+                    st.rerun()
+            with b2:
+                if st.button("흔들기", key=f"care_s_{key}", use_container_width=True):
+                    st.session_state["_fx"] = "shake"
+                    st.rerun()
+            with b3:
+                if st.button(f"열매 따기 ({ready})", key=f"care_f_{key}",
+                             disabled=ready == 0, use_container_width=True):
+                    care_action(key, number, "fruit")
+                    st.rerun()
+
+            msg = f"물 {care['waters']}번 · 딴 열매 {care['fruits']}개"
+            if t["kind"] != "l":
+                msg += f" · 물 {WATER_TO_WEEK}번마다 1주씩 빨리 자라요"
+            st.caption(msg)
+        else:
+            st.caption("편지를 넣으면 내 나무가 심어져요.")
+
+        mine = [e for e in garden_state(key, safe=True) if str(e["number"]) == number]
+        st.markdown(f"**내가 놓은 것** — {len(mine)}/{MAX_PER_STUDENT}개")
+        for e in mine:
             col1, col2 = st.columns([3, 1])
             with col1:
                 st.markdown(f'<span class="badge">{ITEMS[e["item"]]["label"]}</span>',
@@ -807,12 +1017,23 @@ def page_tree(key):
                 if st.button("치우기", key=f"g_del_{e['event_id']}"):
                     garden_remove(key, e["event_id"], by=number)
                     st.rerun()
-        st.caption("치워도 기록은 남아서 선생님이 되돌릴 수 있어요.")
+        if mine:
+            st.caption("치워도 기록은 남아서 선생님이 되돌릴 수 있어요.")
+
+        rec = find_letter(key, number)
+        if rec:
+            written = datetime.fromisoformat(rec["written_at"]).date()
+            st.markdown(
+                f'<div class="center" style="margin-top:1rem;"><span class="badge">'
+                f'{esc(rec["nickname"])}의 편지는 잘 있어요 · {(date.today()-written).days}일째'
+                f'</span></div>',
+                unsafe_allow_html=True,
+            )
 
     st.markdown(
         f'<div class="center" style="margin-top:1.2rem;"><span class="badge">'
-        f'{c["name"]} 편지 {len(load_letters(key))}통 · 꾸민 것 {len(garden_state(key))}개'
-        f'</span></div>',
+        f'{c["name"]} 편지 {len(load_letters(key, safe=True))}통 · '
+        f'꾸민 것 {len(garden_state(key, safe=True))}개</span></div>',
         unsafe_allow_html=True,
     )
 
@@ -866,6 +1087,7 @@ def page_open():
 
     # 배경은 반드시 위젯보다 "먼저" 그려야 합니다.
     # position:fixed 라 나중에 그리면 앞선 위젯들을 덮어 가려 버립니다.
+    st.session_state.pop("_me", None)      # 교사 화면에서는 특정 나무를 키우지 않습니다
     render_backdrop(key, stage=3, guide=st.session_state.get("guide_on", False))
 
     top1, top2 = st.columns([1, 1])
@@ -906,7 +1128,7 @@ def page_open():
     if idx < 0:
         st.markdown('<div class="sky-title">타임캡슐이 열립니다</div>', unsafe_allow_html=True)
         st.markdown(
-            f'<div class="sky-sub">{c["name"]} · {len(letters)}통의 편지 · {weeks_elapsed(key)}주 만에</div>',
+            f'<div class="sky-sub">{c["name"]} · {len(letters)}그루 · {len(letters)}통의 편지</div>',
             unsafe_allow_html=True,
         )
         if st.button("첫 번째 편지 열기"):
@@ -1020,10 +1242,18 @@ def main():
         return
 
     play_music()
-    tab1, tab2 = st.tabs(["편지 쓰기", "우리 농장"])
-    with tab1:
+
+    # 탭 대신 라디오. 탭은 안쪽이 숨겨진 채로 그려져서 화면에 따라 안 보일 수 있습니다.
+    mode = st.radio(
+        "무엇을 할까요",
+        ["편지 쓰기", "우리 농장"],
+        horizontal=True,
+        key="stu_mode",
+        label_visibility="collapsed",
+    )
+    if mode == "편지 쓰기":
         page_write(key)
-    with tab2:
+    else:
         page_tree(key)
 
 
