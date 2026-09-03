@@ -400,7 +400,10 @@ def inject_css(stage_file, intro=False):
   }}
   /* 배경은 맨 뒤, 본문은 그 위. 그리는 순서에만 기대지 않도록 못을 박습니다. */
   .block-container {{position: relative; z-index: 1;}}
-  [data-testid="stMain"] {{position: relative; z-index: 1;}}
+  [data-testid="stVerticalBlock"],
+  [data-testid="stHorizontalBlock"],
+  [data-testid="stElementContainer"],
+  [data-testid="stForm"] {{position: relative; z-index: 1;}}
   @keyframes veilOut {{from {{opacity: 1;}} to {{opacity: 0;}}}}
 
   /* 시작 화면 아이콘 */
@@ -722,61 +725,80 @@ def page_write(key):
 # 화면 2 — 내 나무 보기
 # ─────────────────────────────────────────────────────────────
 def page_tree(key):
-    """우리 농장 — 꽃을 골라 놓고, 자기가 놓은 것은 치울 수 있습니다.
-
-    번호는 마지막에 받습니다. 먼저 고르고 움직여 보게 해야
-    화면이 비어 보이지 않습니다.
-    """
+    """우리 농장 — 배경을 보고, 꽃을 놓고, 자기가 놓은 것은 치울 수 있습니다."""
     c = cfg(key)
-    st.markdown('<div class="sky-title">우리 농장</div>', unsafe_allow_html=True)
     st.markdown(
         f'<div class="sky-sub">{c["name"]} · {weeks_elapsed(key)}주차 · '
         f'{STAGE_LABEL[stage_index(key)]} · 개봉까지 {days_left(key)}일</div>',
         unsafe_allow_html=True,
     )
 
-    names = list(ITEMS.keys())
-    labels = [ITEMS[i]["label"] for i in names]
-    picked = st.selectbox("무엇을 놓을까요", labels, key=f"g_sel_{key}")
-    item = names[labels.index(picked)]
-
-    # 슬라이더가 돌려주는 값을 그대로 씁니다.
-    # session_state 를 다시 읽으면 위젯이 아직 등록되기 전 순간에 KeyError 가 납니다.
-    zone = ITEMS[item]["zone"]
-    x = st.slider("왼쪽 ↔ 오른쪽", 5, 95, 50, key=f"g_x_{key}")
-    if zone == "ground":
-        y = st.slider("뒤쪽 ↔ 앞쪽", 68, 96, 82, key=f"g_y_{key}")
-    else:
-        y = st.slider("낮게 ↔ 높게", 20, 60, 42, key=f"g_yk_{key}")
-
-    st.caption("움직이면 화면 뒤에 흐리게 미리 보입니다.")
-
     number = st.text_input("번호", max_chars=2, placeholder="예: 7", key=f"t_num_{key}").strip()
 
-    # 배경에 흐리게 얹을 미리보기
-    st.session_state["_preview"] = {
-        "event_id": "_preview", "number": number or "0", "item": item,
-        "x": x, "y": y,
-    }
+    # 미리보기용 임시 배치 — 배경에 흐리게 얹힙니다
+    preview = None
+    if number.isdigit():
+        item = st.session_state.get(f"g_item_{key}")
+        if item:
+            preview = {
+                "event_id": "_preview", "number": number, "item": item,
+                "x": st.session_state.get(f"g_x_{key}", 50),
+                "y": st.session_state.get(f"g_y_{key}", 80),
+            }
+    st.session_state["_preview"] = preview
 
-    if st.button("여기에 놓기", key=f"g_put_{key}"):
-        if not number.isdigit():
-            st.error("번호를 넣어 주세요.")
-        elif garden_count(key, number) >= MAX_PER_STUDENT:
-            st.error(f"한 사람이 {MAX_PER_STUDENT}개까지 놓을 수 있어요. 하나를 치우면 다시 놓을 수 있어요.")
+    if not number.isdigit():
+        st.caption("번호를 넣으면 꽃을 놓을 수 있어요.")
+        return
+
+    rec = find_letter(key, number)
+    if rec:
+        written = datetime.fromisoformat(rec["written_at"]).date()
+        st.markdown(
+            f'<div class="center" style="margin:0.8rem 0;"><span class="badge">'
+            f'{esc(rec["nickname"])}의 편지는 잘 있어요 · {(date.today()-written).days}일째'
+            f'</span></div>',
+            unsafe_allow_html=True,
+        )
+
+    mine = garden_count(key, number)
+    st.markdown(f"**꾸미기** — {mine}/{MAX_PER_STUDENT}개 놓았어요")
+
+    if mine < MAX_PER_STUDENT:
+        names = list(ITEMS.keys())
+        labels = [ITEMS[i]["label"] for i in names]
+        picked = st.selectbox("무엇을 놓을까요", labels, key=f"g_sel_{key}")
+        st.session_state[f"g_item_{key}"] = names[labels.index(picked)]
+
+        zone = ITEMS[st.session_state[f"g_item_{key}"]]["zone"]
+        st.slider("왼쪽 ↔ 오른쪽", 5, 95, key=f"g_x_{key}",
+                  value=st.session_state.get(f"g_x_{key}", 50))
+        if zone == "ground":
+            st.slider("뒤쪽 ↔ 앞쪽", 68, 96, key=f"g_y_{key}",
+                      value=st.session_state.get(f"g_y_{key}", 82))
         else:
+            st.slider("낮게 ↔ 높게", 20, 60, key=f"g_y_{key}",
+                      value=st.session_state.get(f"g_y_{key}", 42))
+
+        if st.button("여기에 놓기", key=f"g_put_{key}"):
             try:
-                garden_place(key, number, item, x, y)
+                garden_place(key, number,
+                             st.session_state[f"g_item_{key}"],
+                             st.session_state[f"g_x_{key}"],
+                             st.session_state[f"g_y_{key}"])
             except Exception as err:
                 st.error("놓지 못했어요. 잠시 뒤에 다시 해 보세요.")
                 st.exception(err)
                 return
             st.rerun()
+    else:
+        st.caption(f"한 사람이 {MAX_PER_STUDENT}개까지 놓을 수 있어요. 하나를 치우면 다시 놓을 수 있어요.")
 
-    if number.isdigit():
-        mine = [e for e in garden_state(key, safe=True) if str(e["number"]) == number]
-        st.markdown(f"**내가 놓은 것** — {len(mine)}/{MAX_PER_STUDENT}개")
-        for e in mine:
+    # 자기가 놓은 것만 치울 수 있습니다
+    own = [e for e in garden_state(key) if e["number"] == number]
+    if own:
+        st.markdown("**내가 놓은 것**")
+        for e in own:
             col1, col2 = st.columns([3, 1])
             with col1:
                 st.markdown(f'<span class="badge">{ITEMS[e["item"]]["label"]}</span>',
@@ -785,23 +807,12 @@ def page_tree(key):
                 if st.button("치우기", key=f"g_del_{e['event_id']}"):
                     garden_remove(key, e["event_id"], by=number)
                     st.rerun()
-        if mine:
-            st.caption("치워도 기록은 남아서 선생님이 되돌릴 수 있어요.")
-
-        rec = find_letter(key, number)
-        if rec:
-            written = datetime.fromisoformat(rec["written_at"]).date()
-            st.markdown(
-                f'<div class="center" style="margin-top:1rem;"><span class="badge">'
-                f'{esc(rec["nickname"])}의 편지는 잘 있어요 · {(date.today()-written).days}일째'
-                f'</span></div>',
-                unsafe_allow_html=True,
-            )
+        st.caption("치워도 기록은 남아서 선생님이 되돌릴 수 있어요.")
 
     st.markdown(
         f'<div class="center" style="margin-top:1.2rem;"><span class="badge">'
-        f'{c["name"]} 편지 {len(load_letters(key, safe=True))}통 · '
-        f'꾸민 것 {len(garden_state(key, safe=True))}개</span></div>',
+        f'{c["name"]} 편지 {len(load_letters(key))}통 · 꾸민 것 {len(garden_state(key))}개'
+        f'</span></div>',
         unsafe_allow_html=True,
     )
 
@@ -1009,18 +1020,10 @@ def main():
         return
 
     play_music()
-
-    # 탭 대신 라디오. 탭은 안쪽이 숨겨진 채로 그려져서 화면에 따라 안 보일 수 있습니다.
-    mode = st.radio(
-        "무엇을 할까요",
-        ["편지 쓰기", "우리 농장"],
-        horizontal=True,
-        key="stu_mode",
-        label_visibility="collapsed",
-    )
-    if mode == "편지 쓰기":
+    tab1, tab2 = st.tabs(["편지 쓰기", "우리 농장"])
+    with tab1:
         page_write(key)
-    else:
+    with tab2:
         page_tree(key)
 
 
