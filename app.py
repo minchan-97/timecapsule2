@@ -6,6 +6,7 @@
 import base64
 import json
 import random
+import re
 
 import requests
 from datetime import date, datetime
@@ -205,12 +206,25 @@ def sb_select(table, class_key):
 
 
 def sb_insert(table, row):
+    """표에 없는 칸이 있으면 그 칸만 빼고 다시 넣습니다.
+
+    나중에 기능을 더하면서 칸이 늘어나도, SQL 을 미처 실행하지 않은 상태에서
+    아이 화면이 멈추지 않게 합니다. 잃는 건 그 칸의 값 하나뿐입니다.
+    """
     url, _ = sb_conf()
-    r = requests.post(
-        f"{url}/rest/v1/{table}", headers=sb_headers(), json=row, timeout=10
-    )
-    if r.status_code >= 400:
+    payload = dict(row)
+    for _ in range(4):
+        r = requests.post(
+            f"{url}/rest/v1/{table}", headers=sb_headers(), json=payload, timeout=10
+        )
+        if r.status_code < 400:
+            return
+        m = re.search(r"Could not find the '(\w+)' column", r.text or "")
+        if m and m.group(1) in payload:
+            payload.pop(m.group(1))
+            continue
         raise SupabaseError("쓰기", table, r.status_code, r.text)
+    raise SupabaseError("쓰기", table, r.status_code, r.text)
 
 
 def sb_check():
