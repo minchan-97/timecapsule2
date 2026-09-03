@@ -80,14 +80,14 @@ STAGE_LABEL = ["아직 아무것도", "묘목", "자라는 중", "큰 나무"]
 # 꾸미기 아이템 — sky=하늘에 뜨는 것, ground=땅에 놓는 것
 # r = 세로%/가로% (그림 원본 비율에서 나온 값). 세로를 직접 지정하기 위한 값입니다.
 ITEMS = {
-    "delphinium": {"label": "파란 꽃",  "zone": "ground", "w": 9,  "r": 3.525},
-    "poppy":      {"label": "주황 꽃",  "zone": "ground", "w": 11, "r": 1.925},
-    "daisy":      {"label": "노란 꽃",  "zone": "ground", "w": 9,  "r": 2.603},
-    "clover":     {"label": "클로버",   "zone": "ground", "w": 6,  "r": 1.893},
-    "grass":      {"label": "풀과 돌",  "zone": "ground", "w": 20, "r": 1.332},
-    "bush":       {"label": "덤불",     "zone": "ground", "w": 20, "r": 1.155},
-    "butterfly":  {"label": "나비",     "zone": "sky",    "w": 8,  "r": 2.520},
-    "bird":       {"label": "새",       "zone": "sky",    "w": 11, "r": 2.107},
+    "delphinium": {"label": "파란 꽃",  "zone": "ground", "w": 3.0, "r": 3.525},
+    "poppy":      {"label": "주황 꽃",  "zone": "ground", "w": 3.6, "r": 1.925},
+    "daisy":      {"label": "노란 꽃",  "zone": "ground", "w": 3.0, "r": 2.603},
+    "clover":     {"label": "클로버",   "zone": "ground", "w": 2.2, "r": 1.893},
+    "grass":      {"label": "풀과 돌",  "zone": "ground", "w": 6.5, "r": 1.332},
+    "bush":       {"label": "덤불",     "zone": "ground", "w": 6.5, "r": 1.155},
+    "butterfly":  {"label": "나비",     "zone": "sky",    "w": 2.8, "r": 2.520},
+    "bird":       {"label": "새",       "zone": "sky",    "w": 3.8, "r": 2.107},
 }
 
 MAX_PER_STUDENT = 3   # 한 사람이 놓을 수 있는 개수
@@ -636,6 +636,23 @@ def inject_css(stage_file, intro=False):
     animation-timing-function: ease-in-out;
   }}
   .ptree.mine {{filter: drop-shadow(0 6px 14px rgba(90,70,40,0.22));}}
+  /* 흔들었을 때 — 크게 흔들렸다가 잦아듭니다 */
+  .ptree.shaking {{
+    animation-name: treeShake;
+    animation-duration: 1.8s !important;
+    animation-iteration-count: 1;
+    animation-timing-function: cubic-bezier(.36,.07,.19,.97);
+  }}
+  @keyframes treeShake {{
+    0%   {{transform: translate(-50%, -100%) rotate(0deg);}}
+    8%   {{transform: translate(-50%, -100%) rotate(-3.4deg);}}
+    22%  {{transform: translate(-50%, -100%) rotate(2.8deg);}}
+    38%  {{transform: translate(-50%, -100%) rotate(-2deg);}}
+    54%  {{transform: translate(-50%, -100%) rotate(1.3deg);}}
+    70%  {{transform: translate(-50%, -100%) rotate(-0.8deg);}}
+    85%  {{transform: translate(-50%, -100%) rotate(0.4deg);}}
+    100% {{transform: translate(-50%, -100%) rotate(0deg);}}
+  }}
   @keyframes treeSway {{
     0%, 100% {{transform: translate(-50%, -100%) rotate(calc(var(--sway) * -1));}}
     50%      {{transform: translate(-50%, -100%) rotate(var(--sway));}}
@@ -673,15 +690,19 @@ def inject_css(stage_file, intro=False):
     100% {{opacity: 0; transform: translateY(var(--fall)) scaleY(1.3);}}
   }}
   .leaf {{
-    width: 1%; height: 1.4%;
-    background: rgba(126,160,82,0.9);
     border-radius: 50% 0 50% 0;
-    animation: leafFall 2.6s ease-in forwards;
+    opacity: 0.92;
+    animation-name: leafFall;
+    animation-timing-function: cubic-bezier(.35,.05,.6,1);
+    animation-fill-mode: forwards;
   }}
   @keyframes leafFall {{
-    0%   {{opacity: 0; transform: translate(0,0) rotate(0deg);}}
-    12%  {{opacity: 1;}}
-    100% {{opacity: 0; transform: translate(3vw, var(--fall)) rotate(420deg);}}
+    0%   {{opacity: 0; transform: translate(0, 0) rotate(0deg);}}
+    10%  {{opacity: 0.95;}}
+    45%  {{transform: translate(calc(var(--drift) * 0.6), calc(var(--fall) * 0.45))
+                      rotate(calc(var(--spin) * 0.5));}}
+    100% {{opacity: 0;
+           transform: translate(var(--drift), var(--fall)) rotate(var(--spin));}}
   }}
   .fruit {{
     width: 1.1%; height: 2%;
@@ -695,7 +716,8 @@ def inject_css(stage_file, intro=False):
     50%      {{transform: translateY(0.6%);}}
   }}
   @media (prefers-reduced-motion: reduce) {{
-    .fruit {{animation: none !important;}}
+    .fruit, .leaf, .drop, .ptree.shaking {{animation: none !important;}}
+    .leaf, .drop {{display: none;}}
   }}
   /* 정렬 확인용 — 판의 테두리와 언덕선(82.3%) 을 그려 봅니다 */
   .canvas.guide {{outline: 3px dashed rgba(220,60,60,0.9); outline-offset: -3px;}}
@@ -752,16 +774,22 @@ def render_backdrop(key, extra=None, stage=None, guide=False):
 
     # 번호별 개인 나무. 편지 한 통이 나무 한 그루입니다.
     me = st.session_state.get("_me")
+    # 방금 누른 동작은 나무를 그리기 "전에" 알아야 흔들림을 걸 수 있습니다.
+    fx_now = st.session_state.pop("_fx", None)
+    shaking = fx_now == "shake"
     for t in personal_trees(key, me=me):
         h = t["w"] * t["r"]
         cls = "ptree mine" if t["mine"] else "ptree"
-        layers.append(
+        if t["mine"] and shaking:
+            cls += " shaking"
+        layers.append((
+            t["ground"],
             f'<img class="{cls}" src="{asset_url(t["f"])}" '
             f'style="left:{t["x"]}%;top:{t["ground"]}%;'
             f'width:{t["w"]}%;height:{h:.2f}%;'
             f'--sway:{t["sway"]}deg;animation-duration:{t["dur"]}s;" '
             f'alt="{esc(str(t["number"]))}번 나무">'
-        )
+        ))
 
     items = garden_state(key, safe=True)
     if extra:
@@ -775,48 +803,65 @@ def render_backdrop(key, extra=None, stage=None, guide=False):
         cls = "flyA" if meta["zone"] == "sky" else "swayA"
         ghost = " ghost" if e.get("event_id") == "_preview" else ""
         fx = -1 if e.get("flip") else 1          # 좌우 뒤집기
-        layers.append(
+        # 미리보기는 항상 맨 앞. 나머지는 아래쪽에 있을수록 앞에 옵니다.
+        depth_key = 999 if ghost else e["y"]
+        layers.append((
+            depth_key,
             f'<img class="deco {cls}{ghost}" src="{asset_url("items/" + e["item"] + ".webp")}" '
             f'style="left:{e["x"]}%;top:{e["y"]}%;'
             f'width:{w:.2f}%;height:{w * meta["r"]:.2f}%;--fx:{fx};'
             f'animation-duration:{3.2 + (i % 5) * 0.7:.1f}s;'
             f'animation-delay:{(i % 7) * 0.4:.1f}s;" alt="">'
-        )
+        ))
 
     # 방금 한 동작에 대한 반응(물방울 / 낙엽). 한 번 보여 주고 사라집니다.
     my = [t for t in personal_trees(key, me=me) if t["mine"]] if me else []
     if my:
         t = my[0]
         top = t["ground"] - t["w"] * t["r"]
-        fx_now = st.session_state.pop("_fx", None)
         if fx_now == "water":
             for j in range(9):
-                layers.append(
+                layers.append((
+                    1000,
                     f'<div class="drop" style="left:{t["x"] - 6 + j * 1.5:.1f}%;'
                     f'top:{top - 3:.1f}%;--fall:{t["ground"] - top + 3:.1f}%;'
                     f'animation-delay:{j * 0.12:.2f}s;"></div>'
-                )
+                ))
         elif fx_now == "shake":
-            for j in range(7):
-                layers.append(
-                    f'<div class="leaf" style="left:{t["x"] - 7 + j * 2.3:.1f}%;'
-                    f'top:{top + 10:.1f}%;--fall:{t["ground"] - top - 10:.1f}%;'
-                    f'animation-delay:{j * 0.18:.2f}s;"></div>'
-                )
+            span = t["w"] * 0.9
+            for j in range(16):
+                g = (j * 47 % 100) / 100          # 잎마다 다른 고정값
+                h = (j * 71 % 100) / 100
+                drift = (g - 0.5) * 2 * (6 + h * 8)          # 좌우로 흩날리는 폭
+                size = 0.7 + h * 0.7
+                shade = ("#8fae5c", "#7a9b4e", "#a3bd6e", "#6f8f45")[j % 4]
+                layers.append((
+                    1000,
+                    f'<div class="leaf" style="'
+                    f'left:{t["x"] - span / 2 + span * g:.1f}%;'
+                    f'top:{top + (t["ground"] - top) * (0.1 + 0.45 * h):.1f}%;'
+                    f'width:{size:.2f}%;height:{size * 1.5:.2f}%;background:{shade};'
+                    f'--fall:{t["ground"] - top - (t["ground"] - top) * (0.1 + 0.45 * h):.1f}%;'
+                    f'--drift:{drift:.1f}vw;--spin:{300 + g * 420:.0f}deg;'
+                    f'animation-duration:{2.0 + h * 1.6:.1f}s;'
+                    f'animation-delay:{j * 0.055:.2f}s;"></div>'
+                ))
 
         # 열매 — 다 자란 내 나무에만 맺힙니다
         for j in range(min(fruits_ready(key, me, t["kind"]), 8)):
             gx, gy = (j * 37 % 100) / 100, (j * 53 % 100) / 100
-            layers.append(
+            layers.append((
+                1000,
                 f'<div class="fruit" style="'
                 f'left:{t["x"] - t["w"] * 0.3 + t["w"] * 0.6 * gx:.1f}%;'
                 f'top:{top + (t["ground"] - top) * (0.2 + 0.4 * gy):.1f}%;'
                 f'animation-delay:{j * 0.3:.1f}s;"></div>'
-            )
+            ))
 
     cls = "canvas guide" if guide else "canvas"
+    html = "".join(h for _, h in sorted(layers, key=lambda p: p[0]))
     st.markdown(
-        f'<div class="backdrop"><div class="{cls}">{"".join(layers)}</div></div>',
+        f'<div class="backdrop"><div class="{cls}">{html}</div></div>',
         unsafe_allow_html=True,
     )
     return items
