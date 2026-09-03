@@ -36,6 +36,8 @@ CLASSES = {
     "6-4": {"name": "6학년 4반", "code": "namu64", "start": date(2026, 9, 4), "open": date(2026, 12, 18)},
 }
 
+CREDIT = "copyright by-김주아"   # 시작 화면 아래에 작게. 빈 문자열로 두면 안 나옵니다.
+
 TEACHER_PIN = "0000"   # 배포 전에 반드시 바꾸세요. 이 코드로 들어가면 개봉 화면입니다.
 MUSIC_FILE  = "music.mp3"
 
@@ -676,6 +678,14 @@ def inject_css(stage_file, intro=False):
     50%      {{transform: translate(-50%, -50%) translate(16px, -12px) scaleX(var(--fx, 1)) rotate(3deg);}}
   }}
   .ghost {{opacity: 0.55;}}
+  .credit {{
+    text-align: center;
+    font-size: 0.72rem;
+    letter-spacing: 0.03em;
+    color: rgba(110,127,106,0.75);
+    text-shadow: 0 1px 6px rgba(255,255,255,0.9);
+    margin-top: 2.2rem;
+  }}
   /* 돌보기 반응 — 물방울, 낙엽, 열매 */
   .drop, .leaf, .fruit {{position: absolute; pointer-events: none;}}
   .drop {{
@@ -1262,6 +1272,9 @@ def main():
                 st.rerun()
             else:
                 st.error("코드가 맞지 않아요.")
+        if CREDIT:
+            st.markdown(f'<div class="credit intro-late">{esc(CREDIT)}</div>',
+                        unsafe_allow_html=True)
         return
 
     if teacher:
