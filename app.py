@@ -747,6 +747,7 @@ def inject_css(stage_file, intro=False):
     background-image: url("{bg}");
     background-size: 100% 100%;
     background-repeat: no-repeat;
+    --cw: max(1vw, 1.7766vh);   /* 그림판 가로의 1% */
   }}
   /* 모바일 주소창 때문에 100vh 가 실제 화면보다 큰 문제를 보정합니다 */
   @supports (height: 100dvh) {{
@@ -754,6 +755,7 @@ def inject_css(stage_file, intro=False):
     .canvas {{
       width:  max(100vw, calc(100dvh * 1400 / 788));
       height: max(100dvh, calc(100vw * 788 / 1400));
+      --cw: max(1vw, 1.7766dvh);
     }}
   }}
   /* Streamlit 의 전역 img 규칙이 크기를 바꾸지 못하게 막습니다 */
@@ -975,7 +977,7 @@ def render_backdrop(key, extra=None, stage=None, guide=False):
             f'style="left:{t["x"] + t["w"] * 0.34:.2f}%;top:{t["ground"]:.2f}%;'
             f'width:{sw:.2f}%;height:{sh:.2f}%;">'
             f'<img src="{asset_url("sign.webp")}" alt="">'
-            f'<span style="font-size:{sw * 0.34:.2f}vw;">{esc(name)}</span>'
+            f'<span style="font-size:calc({sw * 0.42:.2f} * var(--cw));">{esc(name)}</span>'
             f'</div>'
         ))
 
