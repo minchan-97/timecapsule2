@@ -576,7 +576,7 @@ def inject_css(stage_file, intro=False):
     bg = asset_url(stage_file)
     bg_anim = "animation: veilOut 2.0s ease-out 1.15s both;" if intro else "opacity: 0; display: none;"
     css = f"""
-@import url('https://fonts.googleapis.com/css2?family=Gaegu:wght@400;700&family=Gowun+Dodum&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Gaegu:wght@400;700&display=swap');
   #MainMenu, footer, header {{visibility: hidden;}}
   .stApp {{background-color: #f3ece2;}}
   [data-testid="stAppViewContainer"],
@@ -622,21 +622,24 @@ def inject_css(stage_file, intro=False):
   .block-container {{max-width: 620px; padding-top: 2.2rem; padding-bottom: 4rem;}}
 
   html, body, [class*="css"], .stMarkdown, p, div, label, input, textarea {{
-    font-family: 'Gowun Dodum', sans-serif;
+    font-family: 'Gaegu', cursive;
+    font-weight: 700;
   }}
 
   .sky-title {{
     font-family: 'Gaegu', cursive; font-size: 2.5rem; font-weight: 700;
-    color: #4a6b3f; text-align: center; letter-spacing: 0.04em;
-    text-shadow: 0 2px 12px rgba(255,255,255,0.9); margin-bottom: 0.1rem;
+    color: #2f4a26; text-align: center; letter-spacing: 0.04em;
+    text-shadow: 0 0 10px rgba(255,255,255,1), 0 2px 3px rgba(255,255,255,1);
+    margin-bottom: 0.1rem;
   }}
   .sky-sub {{
-    text-align: center; color: #6e7f6a; font-size: 1.15rem;
-    text-shadow: 0 1px 8px rgba(255,255,255,0.9); margin-bottom: 1.6rem;
+    text-align: center; color: #3c4a38; font-size: 1.4rem; font-weight: 700;
+    text-shadow: 0 0 8px rgba(255,255,255,1), 0 1px 2px rgba(255,255,255,1);
+    margin-bottom: 1.6rem;
   }}
 
   .paper {{
-    background: rgba(253, 249, 240, 0.93);
+    background: rgba(253, 249, 240, 0.97);
     border: 1px solid rgba(139,111,78,0.28); border-radius: 3px;
     padding: 1.5rem 1.6rem; box-shadow: 0 8px 28px rgba(90,70,40,0.16);
     animation: rise 0.7s ease-out;
@@ -648,48 +651,83 @@ def inject_css(stage_file, intro=False):
   @media (prefers-reduced-motion: reduce) {{ .paper {{animation: none;}} }}
 
   .letter-body {{
-    font-family: 'Gaegu', cursive; font-size: 1.6rem; line-height: 1.95;
-    color: #3f3a33; white-space: pre-wrap; word-break: break-word;
+    font-family: 'Gaegu', cursive; font-size: 1.7rem; line-height: 1.9;
+    color: #24211c; font-weight: 700; white-space: pre-wrap; word-break: break-word;
   }}
   .letter-from {{
-    font-family: 'Gaegu', cursive; font-size: 1.35rem;
-    color: #8b6f4e; text-align: right; margin-top: 1.2rem;
+    font-family: 'Gaegu', cursive; font-size: 1.45rem;
+    color: #6b5232; font-weight: 700; text-align: right; margin-top: 1.2rem;
   }}
   .meta {{
-    font-size: 1.0rem; color: #8d8477;
+    font-size: 1.22rem; color: #5f584e; font-weight: 700;
     border-top: 1px dashed rgba(139,111,78,0.3);
     padding-top: 0.7rem; margin-top: 1.1rem;
   }}
   .badge {{
     display: inline-block; background: rgba(253,249,240,0.9);
     border: 1px solid rgba(139,111,78,0.25); border-radius: 999px;
-    padding: 0.4rem 1.1rem; font-size: 1.08rem; color: #5c6b4f;
+    padding: 0.4rem 1.1rem; font-size: 1.3rem; color: #2f4a26; font-weight: 700;
+    background: rgba(253,249,240,0.96); border-color: rgba(139,111,78,0.45);
   }}
   .center {{text-align: center;}}
 
   .stButton > button {{
-    background: #7d9b5e; color: #fff; border: none; border-radius: 4px;
-    padding: 0.62rem 1.5rem; font-family: 'Gowun Dodum', sans-serif;
+    background: #55703c; color: #fff; border: none; border-radius: 4px; font-weight: 700;
+    padding: 0.62rem 1.5rem; font-family: 'Gaegu', cursive;
   }}
-  .stButton > button:hover {{background: #6b8850; color: #fff;}}
+  .stButton > button:hover {{background: #43592e; color: #fff;}}
   .stButton > button:focus-visible {{outline: 3px solid #f2c25c; outline-offset: 2px;}}
 
   .stTextInput input, .stTextArea textarea {{
-    background: rgba(253,249,240,0.95); border: 1px solid rgba(139,111,78,0.3);
+    background: rgba(253,249,240,0.98); border: 1px solid rgba(139,111,78,0.5);
   }}
-  .stTextArea textarea {{font-family: 'Gaegu', cursive; font-size: 1.45rem; line-height: 1.9;}}
-  /* Streamlit 기본 글씨가 아이들에게 작아서 전체적으로 키웁니다 */
-  .stApp, .stMarkdown p, .stMarkdown li {{font-size: 1.08rem;}}
+  .stTextArea textarea {{font-family: 'Gaegu', cursive; font-size: 1.55rem; line-height: 1.85;}}
+  /* Streamlit 기본 글씨 — 크기·굵기·색을 함께 올립니다.
+     수채화 배경 위에 바로 얹히므로 흰 테두리 그림자로 시인성을 확보합니다. */
+  .stApp, .stMarkdown p, .stMarkdown li,
+  label, button, input, textarea, select,
+  [data-baseweb="select"], [data-testid="stWidgetLabel"] p,
+  [data-testid="stCaptionContainer"] p, [data-testid="stExpander"] summary p {{
+    font-family: 'Gaegu', cursive !important;
+  }}
+  .stApp, .stMarkdown p, .stMarkdown li {{
+    font-size: 1.3rem; color: #24211c; font-weight: 700;
+  }}
   label, .stRadio label, .stCheckbox label,
-  [data-testid="stWidgetLabel"] p {{font-size: 1.1rem !important;}}
+  [data-testid="stWidgetLabel"] p {{
+    font-size: 1.38rem !important;
+    font-weight: 700 !important;
+    color: #24211c !important;
+    text-shadow: 0 0 7px rgba(255,255,255,1), 0 1px 2px rgba(255,255,255,1);
+  }}
   .stRadio [role="radiogroup"] label p,
-  .stCheckbox label p {{font-size: 1.12rem !important;}}
+  .stCheckbox label p {{
+    font-size: 1.4rem !important; font-weight: 700 !important; color: #24211c !important;
+  }}
   [data-testid="stCaptionContainer"] p,
-  .stCaption, small {{font-size: 0.98rem !important;}}
-  .stButton > button {{font-size: 1.1rem;}}
-  .stTextInput input {{font-size: 1.15rem;}}
-  [data-baseweb="select"] {{font-size: 1.1rem;}}
-  [data-testid="stExpander"] summary p {{font-size: 1.1rem;}}
+  .stCaption, small {{
+    font-size: 1.2rem !important;
+    color: #3f3a33 !important;
+    font-weight: 700 !important;
+    text-shadow: 0 0 6px rgba(255,255,255,1);
+  }}
+  .stButton > button {{font-size: 1.35rem; font-weight: 700;}}
+  .stTextInput input, .stTextArea textarea {{
+    font-size: 1.4rem; color: #24211c; font-weight: 700;
+  }}
+  .stTextInput input::placeholder, .stTextArea textarea::placeholder {{
+    color: #9a9184; font-weight: 400;
+  }}
+  [data-baseweb="select"] {{font-size: 1.35rem;}}
+  [data-baseweb="select"] div {{color: #24211c; font-weight: 700;}}
+  [data-testid="stExpander"] summary p {{
+    font-size: 1.35rem; font-weight: 700; color: #24211c;
+  }}
+  [data-testid="stSliderTickBarMin"], [data-testid="stSliderTickBarMax"],
+  [data-testid="stThumbValue"] {{
+    color: #3f3a33 !important; font-weight: 700 !important;
+    text-shadow: 0 0 6px rgba(255,255,255,1);
+  }}
   /* 농장 배경 — 화면 전체 */
   .backdrop {{
     position: fixed; top: 0; left: 0;
@@ -752,8 +790,9 @@ def inject_css(stage_file, intro=False):
     font-family: 'Gaegu', cursive;
     font-weight: 700;
     line-height: 1;
-    color: #4b3a28;
+    color: #33261a;
     white-space: nowrap;
+    text-shadow: 0 1px 0 rgba(255,248,235,0.6);
   }}
   .sign.mine {{filter: drop-shadow(0 3px 7px rgba(90,70,40,0.3));}}
   .sign.mine span {{color: #2f2519;}}
@@ -804,10 +843,11 @@ def inject_css(stage_file, intro=False):
   .ghost {{opacity: 0.55;}}
   .credit {{
     text-align: center;
-    font-size: 1.15rem;
+    font-size: 1.4rem;
     letter-spacing: 0.02em;
-    color: #1e1e1e;
-    text-shadow: 0 1px 7px rgba(255,255,255,0.95);
+    color: #111111;
+    font-weight: 700;
+    text-shadow: 0 0 8px rgba(255,255,255,1), 0 1px 2px rgba(255,255,255,1);
     margin-top: 2.2rem;
   }}
   /* 돌보기 반응 — 물방울, 낙엽, 열매 */
@@ -1029,7 +1069,8 @@ def printable_html(key, letters):
     return f"""<!doctype html><html lang="ko"><meta charset="utf-8">
 <title>타임캡슐 — {c['name']}</title>
 <style>
- body{{font-family:sans-serif;max-width:640px;margin:3rem auto;padding:0 1.5rem;color:#333;}}
+ @import url('https://fonts.googleapis.com/css2?family=Gaegu:wght@400;700&display=swap');
+ body{{font-family:'Gaegu',sans-serif;font-size:1.15rem;max-width:640px;margin:3rem auto;padding:0 1.5rem;color:#24211c;}}
  h1{{font-size:1.6rem;border-bottom:2px solid #7d9b5e;padding-bottom:.6rem;}}
  article{{page-break-inside:avoid;margin:2.4rem 0;border-left:3px solid #d8ddc9;padding-left:1.2rem;}}
  h2{{font-size:1.1rem;color:#5c6b4f;margin-bottom:.6rem;}}
