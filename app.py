@@ -631,7 +631,7 @@ def inject_css(stage_file, intro=False):
     text-shadow: 0 2px 12px rgba(255,255,255,0.9); margin-bottom: 0.1rem;
   }}
   .sky-sub {{
-    text-align: center; color: #6e7f6a; font-size: 0.95rem;
+    text-align: center; color: #6e7f6a; font-size: 1.15rem;
     text-shadow: 0 1px 8px rgba(255,255,255,0.9); margin-bottom: 1.6rem;
   }}
 
@@ -648,28 +648,28 @@ def inject_css(stage_file, intro=False):
   @media (prefers-reduced-motion: reduce) {{ .paper {{animation: none;}} }}
 
   .letter-body {{
-    font-family: 'Gaegu', cursive; font-size: 1.35rem; line-height: 1.95;
+    font-family: 'Gaegu', cursive; font-size: 1.6rem; line-height: 1.95;
     color: #3f3a33; white-space: pre-wrap; word-break: break-word;
   }}
   .letter-from {{
-    font-family: 'Gaegu', cursive; font-size: 1.15rem;
+    font-family: 'Gaegu', cursive; font-size: 1.35rem;
     color: #8b6f4e; text-align: right; margin-top: 1.2rem;
   }}
   .meta {{
-    font-size: 0.82rem; color: #9a9184;
+    font-size: 1.0rem; color: #8d8477;
     border-top: 1px dashed rgba(139,111,78,0.3);
     padding-top: 0.7rem; margin-top: 1.1rem;
   }}
   .badge {{
     display: inline-block; background: rgba(253,249,240,0.9);
     border: 1px solid rgba(139,111,78,0.25); border-radius: 999px;
-    padding: 0.35rem 1rem; font-size: 0.9rem; color: #5c6b4f;
+    padding: 0.4rem 1.1rem; font-size: 1.08rem; color: #5c6b4f;
   }}
   .center {{text-align: center;}}
 
   .stButton > button {{
     background: #7d9b5e; color: #fff; border: none; border-radius: 4px;
-    padding: 0.55rem 1.4rem; font-family: 'Gowun Dodum', sans-serif;
+    padding: 0.62rem 1.5rem; font-family: 'Gowun Dodum', sans-serif;
   }}
   .stButton > button:hover {{background: #6b8850; color: #fff;}}
   .stButton > button:focus-visible {{outline: 3px solid #f2c25c; outline-offset: 2px;}}
@@ -677,7 +677,19 @@ def inject_css(stage_file, intro=False):
   .stTextInput input, .stTextArea textarea {{
     background: rgba(253,249,240,0.95); border: 1px solid rgba(139,111,78,0.3);
   }}
-  .stTextArea textarea {{font-family: 'Gaegu', cursive; font-size: 1.25rem; line-height: 1.9;}}
+  .stTextArea textarea {{font-family: 'Gaegu', cursive; font-size: 1.45rem; line-height: 1.9;}}
+  /* Streamlit 기본 글씨가 아이들에게 작아서 전체적으로 키웁니다 */
+  .stApp, .stMarkdown p, .stMarkdown li {{font-size: 1.08rem;}}
+  label, .stRadio label, .stCheckbox label,
+  [data-testid="stWidgetLabel"] p {{font-size: 1.1rem !important;}}
+  .stRadio [role="radiogroup"] label p,
+  .stCheckbox label p {{font-size: 1.12rem !important;}}
+  [data-testid="stCaptionContainer"] p,
+  .stCaption, small {{font-size: 0.98rem !important;}}
+  .stButton > button {{font-size: 1.1rem;}}
+  .stTextInput input {{font-size: 1.15rem;}}
+  [data-baseweb="select"] {{font-size: 1.1rem;}}
+  [data-testid="stExpander"] summary p {{font-size: 1.1rem;}}
   /* 농장 배경 — 화면 전체 */
   .backdrop {{
     position: fixed; top: 0; left: 0;
@@ -792,7 +804,7 @@ def inject_css(stage_file, intro=False):
   .ghost {{opacity: 0.55;}}
   .credit {{
     text-align: center;
-    font-size: 1.0rem;
+    font-size: 1.15rem;
     letter-spacing: 0.02em;
     color: #1e1e1e;
     text-shadow: 0 1px 7px rgba(255,255,255,0.95);
@@ -1367,7 +1379,7 @@ def page_open():
                 with cc1:
                     st.markdown(
                         f'<span class="badge">{r["number"]}번 {esc(r["nickname"])}</span>'
-                        f'<span style="font-size:0.8rem;color:#7a7266;"> {esc(head)}…</span>',
+                        f'<span style="font-size:0.95rem;color:#7a7266;"> {esc(head)}…</span>',
                         unsafe_allow_html=True,
                     )
                 with cc2:
