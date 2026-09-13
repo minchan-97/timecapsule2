@@ -62,11 +62,28 @@ TREES = [
 # ── 번호별 개인 나무 ──────────────────────────────────────────
 # 편지를 넣는 순간 그 아이의 나무가 심어지고, 쓴 날부터 자랍니다.
 # r = 세로%/가로% (그림 원본 비율). 어디에 놓든 모양이 안 망가집니다.
+# 묘목·중간 단계는 모든 종류가 함께 씁니다. 다 자랐을 때만 달라집니다.
 TREE_KINDS = {
     "s": {"f": "tree_s.webp", "r": 3.0665, "sway": 1.6, "dur": 4.6},
     "m": {"f": "tree_m.webp", "r": 2.3307, "sway": 1.0, "dur": 6.4},
-    "l": {"f": "tree_l.webp", "r": 1.7555, "sway": 0.6, "dur": 8.2},
 }
+
+# 다 자란 나무 10종. r = 세로%/가로%.
+# 폭은 r 에서 거꾸로 계산하므로, 모양이 달라도 키는 모두 같습니다.
+R_REF = 1.7555      # 기본 나무의 비율. 이걸 기준으로 키를 맞춥니다.
+TREE_CHOICES = {
+    "basic": {"label": "느티나무",     "f": "tree_l.webp",  "r": 1.7555},
+    "t1":    {"label": "동글나무",     "f": "tree1_l.webp", "r": 3.5462},
+    "t2":    {"label": "수양버들",     "f": "tree2_l.webp", "r": 2.4873},
+    "t3":    {"label": "두갈래나무",   "f": "tree3_l.webp", "r": 3.0343},
+    "t4":    {"label": "넓은가지나무", "f": "tree4_l.webp", "r": 2.3929},
+    "t5":    {"label": "삼단나무",     "f": "tree5_l.webp", "r": 3.7415},
+    "t6":    {"label": "삼각나무",     "f": "tree6_l.webp", "r": 3.8559},
+    "t7":    {"label": "키다리나무",   "f": "tree7_l.webp", "r": 3.2226},
+    "t8":    {"label": "다섯송이나무", "f": "tree8_l.webp", "r": 2.9631},
+    "t9":    {"label": "전나무",       "f": "tree9_l.webp", "r": 2.8951},
+}
+DEFAULT_TREE = "basic"
 TREE_CUTS = (3, 8)      # 0~2주 묘목 / 3~7주 자라는 중 / 8주~ 큰 나무
 MY_TREE_W = 21.0        # 내 나무 가로 (캔버스 %)
 OTHER_TREE_W = 7.0      # 다른 아이 나무 가로
@@ -272,6 +289,7 @@ def _write(table, class_key, row):
 
 
 TREE_EXPECT = {"tree_s.webp": (73, 126), "tree_m.webp": (279, 366), "tree_l.webp": (503, 497)}
+TREE_FILES_EXPECT = [c["f"] for c in TREE_CHOICES.values()]
 
 
 @st.cache_data(show_spinner=False)
@@ -280,7 +298,7 @@ def assets_ok():
 
     옛 그림 파일이 섞여 있으면 TREES 좌표와 어긋나 나무가 공중에 뜹니다.
     """
-    bad = []
+    bad = [f"{f} 없음" for f in TREE_FILES_EXPECT if not (STATIC / f).exists()]
     for name, size in TREE_EXPECT.items():
         path = STATIC / name
         if not path.exists():
@@ -294,6 +312,33 @@ def assets_ok():
         except Exception:
             pass
     return bad
+
+
+def sb_delete(table, class_key, match):
+    url, _ = sb_conf()
+    params = {"class_key": f"eq.{class_key}"}
+    params.update({k: f"eq.{v}" for k, v in match.items()})
+    r = requests.delete(f"{url}/rest/v1/{table}", headers=sb_headers(),
+                        params=params, timeout=10)
+    if r.status_code >= 400:
+        raise SupabaseError("삭제", table, r.status_code, r.text)
+
+
+def delete_letter(key, number):
+    """편지를 정말로 지웁니다. 되돌릴 수 없습니다.
+
+    부적절한 내용을 치우기 위한 기능이라 흔적을 남기지 않습니다.
+    지우면 그 번호로 다시 쓸 수 있습니다.
+    """
+    if sb_conf():
+        sb_delete("letters", key, {"number": str(number)})
+    else:
+        path = DATA_DIR / f"letters_{key}.jsonl"
+        if path.exists():
+            keep = [l for l in path.read_text(encoding="utf-8").splitlines()
+                    if l.strip() and json.loads(l).get("number") != str(number)]
+            path.write_text("\n".join(keep) + ("\n" if keep else ""), encoding="utf-8")
+    _read.clear()
 
 
 def storage_label():
@@ -379,6 +424,23 @@ def fruits_ready(key, number, kind):
     return max(0, c["waters"] // FRUIT_PER_WATER - c["fruits"])
 
 
+def tree_choices(key):
+    """번호별로 마지막에 고른 나무 종류. 기록장에 op="tree" 로 쌓입니다."""
+    out = {}
+    for e in garden_log(key, safe=True):
+        if e.get("op") == "tree" and e.get("item") in TREE_CHOICES:
+            out[str(e.get("number"))] = e["item"]
+    return out
+
+
+def set_tree_choice(key, number, choice):
+    garden_append(key, {
+        "op": "tree", "event_id": f"tree-{number}-{int(datetime.now().timestamp()*1000)}",
+        "number": str(number), "item": choice,
+        "at": datetime.now().isoformat(timespec="seconds"),
+    })
+
+
 def care_action(key, number, op):
     garden_append(key, {
         "op": op, "event_id": f"{op}-{number}-{int(datetime.now().timestamp()*1000)}",
@@ -423,6 +485,7 @@ def personal_trees(key, me=None):
 
     letters = sorted(letters, key=num)
     n = len(letters)
+    picks = tree_choices(key)
     out = []
     for i, r in enumerate(letters):
         planted = datetime.fromisoformat(r["written_at"]).date()
@@ -430,13 +493,19 @@ def personal_trees(key, me=None):
         bonus = water_bonus_weeks(care_log(key, r["number"])["waters"])
         weeks = raw + bonus
         kind = "l" if weeks >= TREE_CUTS[1] else ("m" if weeks >= TREE_CUTS[0] else "s")
-        k = TREE_KINDS[kind]
+        if kind == "l":
+            c = TREE_CHOICES.get(picks.get(str(r["number"]), DEFAULT_TREE), TREE_CHOICES[DEFAULT_TREE])
+            k = {"f": c["f"], "r": c["r"], "sway": 0.6, "dur": 8.2}
+        else:
+            k = TREE_KINDS[kind]
 
         mine = me is not None and str(r["number"]) == str(me)
         seed = (num(r) * 2654435761) % 1000       # 번호에서 만든 고정 난수
 
+        # 폭은 비율에서 거꾸로 계산합니다. 모양이 달라도 키가 같아집니다.
+        fit = R_REF / k["r"]
         if mine:
-            x, ground, w = 50.0, 84.0, MY_TREE_W
+            x, ground, w = 50.0, 84.0, MY_TREE_W * fit
         else:
             # 8~92% 를 균등 분할하고 칸 안에서만 흔듭니다.
             slot = 84.0 / max(1, n)
@@ -444,7 +513,7 @@ def personal_trees(key, me=None):
             depth = seed % 3                       # 앞뒤 세 겹으로 흩어 놓기
             ground = (76.0, 80.5, 85.0)[depth]
             # 그루가 많으면 자동으로 작아집니다. 30명이어도 빽빽해지지 않습니다.
-            base_w = min(OTHER_TREE_W, slot * 1.5)
+            base_w = min(OTHER_TREE_W, slot * 1.5) * fit
             w = base_w * (0.85, 1.0, 1.15)[depth]
 
         out.append({
@@ -452,6 +521,7 @@ def personal_trees(key, me=None):
             "x": round(x, 2), "ground": ground, "w": round(w, 2),
             "mine": mine, "number": r["number"], "nickname": r.get("nickname", ""),
             "weeks": weeks, "raw_weeks": raw, "bonus": bonus, "kind": kind,
+            "choice": picks.get(str(r["number"]), DEFAULT_TREE),
         })
     # 내 나무를 마지막에 그려 맨 앞에 오게 합니다
     out.sort(key=lambda t: (t["mine"], t["ground"]))
@@ -645,6 +715,7 @@ def inject_css(stage_file, intro=False):
   }}
   /* 개인 나무 — 밑동을 땅에 붙이고 그 점을 축으로 흔듭니다 */
   .ptree {{
+    transform: translate(-50%, -100%);   /* 애니메이션이 없을 때의 제자리 */
     transform-origin: 50% 100%;
     filter: drop-shadow(0 4px 8px rgba(90,70,40,0.10));
     animation-name: treeSway;
@@ -657,6 +728,7 @@ def inject_css(stage_file, intro=False):
     animation-name: treeShake;
     animation-duration: 1.8s !important;
     animation-iteration-count: 1;
+    animation-fill-mode: both;           /* 끝난 뒤에도 제자리를 유지 */
     animation-timing-function: cubic-bezier(.36,.07,.19,.97);
   }}
   @keyframes treeShake {{
@@ -675,13 +747,17 @@ def inject_css(stage_file, intro=False):
   }}
   .deco {{
     transform-origin: 50% 100%;
-    transform: translate(-50%, -100%);
+    transform: translate(-50%, -100%) scaleX(var(--fx, 1));
     filter: drop-shadow(0 3px 5px rgba(90,70,40,0.18));
     animation-iteration-count: infinite;
     animation-timing-function: ease-in-out;
   }}
   .deco.swayA {{animation-name: swayA;}}
-  .deco.flyA {{animation-name: flyA; transform-origin: 50% 50%;}}
+  .deco.flyA {{
+    animation-name: flyA;
+    transform-origin: 50% 50%;
+    transform: translate(-50%, -50%) scaleX(var(--fx, 1));
+  }}
   /* --fx 가 -1 이면 좌우로 뒤집힙니다 (나비·새가 반대편을 보게) */
   @keyframes swayA {{
     0%, 100% {{transform: translate(-50%, -100%) scaleX(var(--fx, 1)) rotate(-2.2deg);}}
@@ -694,10 +770,10 @@ def inject_css(stage_file, intro=False):
   .ghost {{opacity: 0.55;}}
   .credit {{
     text-align: center;
-    font-size: 0.72rem;
-    letter-spacing: 0.03em;
-    color: rgba(110,127,106,0.75);
-    text-shadow: 0 1px 6px rgba(255,255,255,0.9);
+    font-size: 1.0rem;
+    letter-spacing: 0.02em;
+    color: #1e1e1e;
+    text-shadow: 0 1px 7px rgba(255,255,255,0.95);
     margin-top: 2.2rem;
   }}
   /* 돌보기 반응 — 물방울, 낙엽, 열매 */
@@ -1049,6 +1125,19 @@ def page_tree(key):
                 unsafe_allow_html=True,
             )
 
+            # 나무 종류 고르기
+            ids = list(TREE_CHOICES.keys())
+            labels = [TREE_CHOICES[i]["label"] for i in ids]
+            cur = t["choice"] if t["choice"] in ids else DEFAULT_TREE
+            pick = st.selectbox("나무 종류", labels, index=ids.index(cur),
+                                key=f"tree_sel_{key}_{number}")
+            chosen = ids[labels.index(pick)]
+            if chosen != cur:
+                set_tree_choice(key, number, chosen)
+                st.rerun()
+            if t["kind"] != "l":
+                st.caption("고른 모습은 다 자랐을 때 나타나요. 지금은 모두 같은 묘목이에요.")
+
             ready = fruits_ready(key, number, t["kind"])
             b1, b2, b3 = st.columns(3)
             with b1:
@@ -1228,6 +1317,44 @@ def page_open():
                                             if k2 in ("op", "event_id", "number", "item", "x", "y")}
                                       | {"at": datetime.now().isoformat(timespec="seconds")})
                         st.rerun()
+
+        # ── 관리 · 지우기 ────────────────────────────────────
+        with st.expander("관리 · 지우기"):
+            st.caption("부적절한 내용을 치울 때만 쓰세요. 편지는 되돌릴 수 없습니다.")
+
+            st.markdown("**편지**")
+            armed = st.checkbox("편지 지우기 켜기", key="del_arm")
+            for r in sorted(letters,
+                            key=lambda x: int(x["number"]) if str(x["number"]).isdigit() else 0):
+                head = r["body"].strip().replace("\n", " ")[:26]
+                cc1, cc2 = st.columns([4, 1])
+                with cc1:
+                    st.markdown(
+                        f'<span class="badge">{r["number"]}번 {esc(r["nickname"])}</span>'
+                        f'<span style="font-size:0.8rem;color:#7a7266;"> {esc(head)}…</span>',
+                        unsafe_allow_html=True,
+                    )
+                with cc2:
+                    if st.button("지우기", key=f"delL_{r['number']}",
+                                 disabled=not armed, use_container_width=True):
+                        delete_letter(key, r["number"])
+                        st.rerun()
+
+            placed = garden_state(key)
+            if placed:
+                st.markdown("**꾸민 것**")
+                st.caption("이건 기록이 남아서 위에서 되돌릴 수 있습니다.")
+                for e in placed:
+                    lbl = ITEMS.get(e["item"], {}).get("label", e["item"])
+                    dc1, dc2 = st.columns([4, 1])
+                    with dc1:
+                        st.markdown(f'<span class="badge">{e["number"]}번 · {lbl}</span>',
+                                    unsafe_allow_html=True)
+                    with dc2:
+                        if st.button("치우기", key=f"delG_{e['event_id']}",
+                                     use_container_width=True):
+                            garden_remove(key, e["event_id"], by="교사")
+                            st.rerun()
         return
 
     if idx >= len(order):
