@@ -85,8 +85,10 @@ TREE_CHOICES = {
 }
 DEFAULT_TREE = "basic"
 TREE_CUTS = (3, 8)      # 0~2주 묘목 / 3~7주 자라는 중 / 8주~ 큰 나무
-MY_TREE_W = 21.0        # 내 나무 가로 (캔버스 %)
-OTHER_TREE_W = 7.0      # 다른 아이 나무 가로
+# 나무는 모두 비슷한 크기입니다. 대신 발치의 팻말에 이름이 적힙니다.
+TREE_W = 13.0           # 기본 가로 (캔버스 %). r 로 보정해 키를 맞춥니다.
+SIGN_W = 3.2            # 이름 팻말 가로
+SIGN_R = 2.0198         # 팻말 세로/가로 비율
 
 # ── 나무 돌보기 ───────────────────────────────────────────────
 WATER_PER_DAY = 1       # 하루에 줄 수 있는 물
@@ -504,21 +506,21 @@ def personal_trees(key, me=None):
 
         # 폭은 비율에서 거꾸로 계산합니다. 모양이 달라도 키가 같아집니다.
         fit = R_REF / k["r"]
-        if mine:
-            x, ground, w = 50.0, 84.0, MY_TREE_W * fit
-        else:
-            # 8~92% 를 균등 분할하고 칸 안에서만 흔듭니다.
-            slot = 84.0 / max(1, n)
-            x = 8.0 + slot * (i + 0.5) + (seed % 100 - 50) / 100 * slot * 0.4
-            depth = seed % 3                       # 앞뒤 세 겹으로 흩어 놓기
-            ground = (76.0, 80.5, 85.0)[depth]
-            # 그루가 많으면 자동으로 작아집니다. 30명이어도 빽빽해지지 않습니다.
-            base_w = min(OTHER_TREE_W, slot * 1.5) * fit
-            w = base_w * (0.85, 1.0, 1.15)[depth]
+
+        # 자리 — 8~92% 를 번호 순으로 균등 분할하고 칸 안에서만 흔듭니다.
+        slot = 84.0 / max(1, n)
+        x = 8.0 + slot * (i + 0.5) + (seed % 100 - 50) / 100 * slot * 0.35
+        depth = seed % 3                           # 앞뒤 세 겹
+        ground = (76.0, 80.5, 85.0)[depth]
+        # 그루가 많으면 자동으로 작아집니다. 30명이어도 빽빽해지지 않습니다.
+        base_w = min(TREE_W, slot * 2.3) * fit
+        w = base_w * (0.88, 1.0, 1.12)[depth]
+        sign_w = min(SIGN_W, slot * 0.8) * (0.88, 1.0, 1.12)[depth]
 
         out.append({
             "f": k["f"], "r": k["r"], "sway": k["sway"], "dur": k["dur"],
             "x": round(x, 2), "ground": ground, "w": round(w, 2),
+            "sign_w": round(sign_w, 2),
             "mine": mine, "number": r["number"], "nickname": r.get("nickname", ""),
             "weeks": weeks, "raw_weeks": raw, "bonus": bonus, "kind": kind,
             "choice": picks.get(str(r["number"]), DEFAULT_TREE),
@@ -722,7 +724,27 @@ def inject_css(stage_file, intro=False):
     animation-iteration-count: infinite;
     animation-timing-function: ease-in-out;
   }}
-  .ptree.mine {{filter: drop-shadow(0 6px 14px rgba(90,70,40,0.22));}}
+  .ptree.mine {{filter: drop-shadow(0 6px 14px rgba(90,70,40,0.28));}}
+  /* 이름 팻말 — 나무 발치에 섭니다 */
+  .sign {{
+    position: absolute;
+    transform: translate(-50%, -100%);
+    pointer-events: none;
+    filter: drop-shadow(0 2px 4px rgba(90,70,40,0.18));
+  }}
+  .sign img {{width: 100%; height: 100%; display: block;}}
+  .sign span {{
+    position: absolute;
+    left: 50%; top: 31%;
+    transform: translate(-50%, -50%);
+    font-family: 'Gaegu', cursive;
+    font-weight: 700;
+    line-height: 1;
+    color: #4b3a28;
+    white-space: nowrap;
+  }}
+  .sign.mine {{filter: drop-shadow(0 3px 7px rgba(90,70,40,0.3));}}
+  .sign.mine span {{color: #2f2519;}}
   /* 흔들었을 때 — 크게 흔들렸다가 잦아듭니다 */
   .ptree.shaking {{
     animation-name: treeShake;
@@ -889,6 +911,20 @@ def render_backdrop(key, extra=None, stage=None, guide=False):
             f'width:{t["w"]}%;height:{h:.2f}%;'
             f'--sway:{t["sway"]}deg;animation-duration:{t["dur"]}s;" '
             f'alt="{esc(str(t["number"]))}번 나무">'
+        ))
+
+        # 발치의 이름 팻말. 나무보다 아주 조금 앞에 옵니다.
+        name = (t["nickname"] or str(t["number"]))[:5]
+        sw = t["sign_w"]
+        sh = sw * SIGN_R
+        layers.append((
+            500 + t["ground"],   # 이름은 가리면 소용없으므로 항상 맨 앞
+            f'<div class="sign{" mine" if t["mine"] else ""}" '
+            f'style="left:{t["x"] + t["w"] * 0.34:.2f}%;top:{t["ground"]:.2f}%;'
+            f'width:{sw:.2f}%;height:{sh:.2f}%;">'
+            f'<img src="{asset_url("sign.webp")}" alt="">'
+            f'<span style="font-size:{sw * 0.34:.2f}vw;">{esc(name)}</span>'
+            f'</div>'
         ))
 
     items = garden_state(key, safe=True)
@@ -1121,7 +1157,7 @@ def page_tree(key):
             extra = f" · 물로 +{t['bonus']}주" if t["bonus"] else ""
             st.markdown(
                 f'<div class="center" style="margin:0.6rem 0;"><span class="badge">'
-                f'{number}번 나무 · {label} · 심은 지 {t["raw_weeks"]}주{extra}</span></div>',
+                f'{esc(t["nickname"] or number)}의 나무 · {label} · 심은 지 {t["raw_weeks"]}주{extra}</span></div>',
                 unsafe_allow_html=True,
             )
 
