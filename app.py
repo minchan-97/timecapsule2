@@ -27,14 +27,14 @@ import streamlit as st
 DEFAULT_CUTS = (2, 5, 9)   # 0~1주 팻말만 / 2~4주 묘목 / 5~8주 자라는 중 / 9주~ 큰 나무
 
 CLASSES = {
-    "5-1": {"name": "5학년 1반", "code": "namu51", "start": date(2026, 9, 1), "open": date(2026, 12, 15)},
-    "5-2": {"name": "5학년 2반", "code": "namu52", "start": date(2026, 9, 1), "open": date(2026, 12, 16)},
-    "5-3": {"name": "5학년 3반", "code": "namu53", "start": date(2026, 9, 2), "open": date(2026, 12, 17)},
-    "5-4": {"name": "5학년 4반", "code": "namu54", "start": date(2026, 9, 2), "open": date(2026, 12, 18)},
-    "6-1": {"name": "6학년 1반", "code": "namu61", "start": date(2026, 9, 3), "open": date(2026, 12, 15)},
-    "6-2": {"name": "6학년 2반", "code": "namu62", "start": date(2026, 9, 3), "open": date(2026, 12, 16)},
-    "6-3": {"name": "6학년 3반", "code": "namu63", "start": date(2026, 9, 4), "open": date(2026, 12, 17)},
-    "6-4": {"name": "6학년 4반", "code": "namu64", "start": date(2026, 9, 4), "open": date(2026, 12, 18)},
+    "5-1": {"name": "5학년 1반", "code": "나무51", "start": date(2026, 9, 1), "open": date(2026, 12, 15)},
+    "5-2": {"name": "5학년 2반", "code": "나무52", "start": date(2026, 9, 1), "open": date(2026, 12, 16)},
+    "5-3": {"name": "5학년 3반", "code": "나무53", "start": date(2026, 9, 2), "open": date(2026, 12, 17)},
+    "5-4": {"name": "5학년 4반", "code": "나무54", "start": date(2026, 9, 2), "open": date(2026, 12, 18)},
+    "6-1": {"name": "6학년 1반", "code": "나무61", "start": date(2026, 9, 3), "open": date(2026, 12, 15)},
+    "6-2": {"name": "6학년 2반", "code": "나무62", "start": date(2026, 9, 3), "open": date(2026, 12, 16)},
+    "6-3": {"name": "6학년 3반", "code": "나무63", "start": date(2026, 9, 4), "open": date(2026, 12, 17)},
+    "6-4": {"name": "6학년 4반", "code": "나무64", "start": date(2026, 9, 4), "open": date(2026, 12, 18)},
 }
 
 CREDIT = "copyright by-김주아"   # 시작 화면 아래에 작게. 빈 문자열로 두면 안 나옵니다.
@@ -118,6 +118,12 @@ MAX_PER_STUDENT = 3   # 한 사람이 놓을 수 있는 개수
 # ─────────────────────────────────────────────────────────────
 # 반 조회
 # ─────────────────────────────────────────────────────────────
+def norm_num(v):
+    """'007' 과 '7' 을 같은 번호로 봅니다. 앞의 0 때문에 남남이 되면 곤란합니다."""
+    v = str(v).strip()
+    return str(int(v)) if v.isdigit() else v
+
+
 def find_class_by_code(code):
     code = code.strip()
     for key, c in CLASSES.items():
@@ -362,8 +368,9 @@ def save_letter(key, record):
 
 
 def find_letter(key, number):
+    want = norm_num(number)
     for r in load_letters(key):
-        if str(r["number"]) == str(number):
+        if norm_num(r["number"]) == want:
             return r
     return None
 
@@ -400,7 +407,7 @@ def care_log(key, number):
     """그 아이의 돌보기 기록만 셉니다. 편지·꾸미기와 같은 기록장을 씁니다."""
     waters, fruits, last = 0, 0, None
     for e in garden_log(key, safe=True):
-        if str(e.get("number")) != str(number):
+        if norm_num(e.get("number")) != norm_num(number):
             continue
         if e.get("op") == "water":
             waters += 1
@@ -501,15 +508,15 @@ def personal_trees(key, me=None):
         else:
             k = TREE_KINDS[kind]
 
-        mine = me is not None and str(r["number"]) == str(me)
+        mine = me is not None and norm_num(r["number"]) == norm_num(me)
         seed = (num(r) * 2654435761) % 1000       # 번호에서 만든 고정 난수
 
         # 폭은 비율에서 거꾸로 계산합니다. 모양이 달라도 키가 같아집니다.
         fit = R_REF / k["r"]
 
         # 자리 — 8~92% 를 번호 순으로 균등 분할하고 칸 안에서만 흔듭니다.
-        slot = 84.0 / max(1, n)
-        x = 8.0 + slot * (i + 0.5) + (seed % 100 - 50) / 100 * slot * 0.35
+        slot = 76.0 / max(1, n)
+        x = 12.0 + slot * (i + 0.5) + (seed % 100 - 50) / 100 * slot * 0.35
         depth = seed % 3                           # 앞뒤 세 겹
         ground = (76.0, 80.5, 85.0)[depth]
         # 그루가 많으면 자동으로 작아집니다. 30명이어도 빽빽해지지 않습니다.
@@ -739,7 +746,14 @@ def inject_css(stage_file, intro=False):
      언덕 위에 놓인 것이 하늘로 떠오르지 않습니다. */
   .canvas {{
     position: absolute; top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
+    /* --shift 만큼 옆으로 밀어 내 나무를 화면 가운데로 가져옵니다.
+       화면 밖으로 여백이 생기지 않도록 clamp 로 이동 범위를 묶습니다. */
+    --canvasw: max(100vw, calc(100vh * 1400 / 788));
+    --half: calc((var(--canvasw) - 100vw) / 2);
+    --shift: 0px;
+    transform: translate(
+      calc(-50% + clamp(calc(-1 * var(--half)), var(--shift), var(--half))), -50%);
+    transition: transform 0.5s ease;
     /* 화면을 덮으면서 그림 비율(1400:788)을 정확히 유지합니다.
        aspect-ratio 나 미디어쿼리에 기대지 않아 브라우저를 가리지 않습니다. */
     width:  max(100vw, calc(100vh * 1400 / 788));
@@ -756,6 +770,7 @@ def inject_css(stage_file, intro=False):
       width:  max(100vw, calc(100dvh * 1400 / 788));
       height: max(100dvh, calc(100vw * 788 / 1400));
       --cw: max(1vw, 1.7766dvh);
+      --canvasw: max(100vw, calc(100dvh * 1400 / 788));
     }}
   }}
   /* Streamlit 의 전역 img 규칙이 크기를 바꾸지 못하게 막습니다 */
@@ -902,6 +917,7 @@ def inject_css(stage_file, intro=False):
     border-top: 2px solid rgba(220,60,60,0.9);
   }}
   @media (prefers-reduced-motion: reduce) {{
+    .canvas {{transition: none;}}
     .deco {{animation: none !important;
             transform: translate(-50%, -100%) scaleX(var(--fx, 1)) !important;}}
     .deco.flyA {{transform: translate(-50%, -50%) scaleX(var(--fx, 1)) !important;}}
@@ -1050,8 +1066,16 @@ def render_backdrop(key, extra=None, stage=None, guide=False):
 
     cls = "canvas guide" if guide else "canvas"
     html = "".join(h for _, h in sorted(layers, key=lambda p: p[0]))
+
+    # 내 나무가 화면 가운데 오도록 그림판을 옆으로 밉니다.
+    # 모바일 세로에서는 그림판이 화면보다 훨씬 넓어 끝쪽 나무가 안 보입니다.
+    shift = ""
+    if my:
+        dx = 50.0 - my[0]["x"]
+        shift = f' style="--shift:calc({dx:.2f} * var(--canvasw) / 100);"'
+
     st.markdown(
-        f'<div class="backdrop"><div class="{cls}">{html}</div></div>',
+        f'<div class="backdrop"><div class="{cls}"{shift}>{html}</div></div>',
         unsafe_allow_html=True,
     )
     return items
@@ -1100,9 +1124,9 @@ def page_write(key):
         st.markdown('<div class="paper center">편지 쓰는 기간이 끝났어요.</div>', unsafe_allow_html=True)
         return
 
-    number = st.text_input("번호", max_chars=2, placeholder="예: 7", key=f"w_num_{key}")
-    if number.strip().isdigit():
-        st.session_state["_me"] = number.strip()
+    number = st.text_input("번호", max_chars=3, placeholder="예: 7", key=f"w_num_{key}")
+    if norm_num(number).isdigit():
+        st.session_state["_me"] = norm_num(number)
     nickname = st.text_input("이름 또는 별명", max_chars=12, placeholder="편지 아래에 적힐 이름", key=f"w_nick_{key}")
     body = st.text_area(
         "그날의 나에게",
@@ -1114,7 +1138,7 @@ def page_write(key):
     st.caption("한 번 넣으면 개봉일까지 열 수 없어요. 선생님은 관리를 위해 내용을 볼 수 있습니다.")
 
     if st.button("팻말에 걸기", key=f"w_btn_{key}"):
-        num = number.strip()
+        num = norm_num(number)
         if not num.isdigit():
             st.error("번호는 숫자로 적어 주세요.")
             return
@@ -1179,7 +1203,7 @@ def page_tree(key):
                        help="나비나 새가 반대편을 보게 합니다.")
     st.caption("움직이면 화면 뒤에 흐리게 미리 보입니다.")
 
-    number = st.text_input("번호", max_chars=2, placeholder="예: 7", key=f"t_num_{key}").strip()
+    number = norm_num(st.text_input("번호", max_chars=3, placeholder="예: 7", key=f"t_num_{key}"))
 
     # 배경에 흐리게 얹을 미리보기
     st.session_state["_preview"] = {
@@ -1255,7 +1279,7 @@ def page_tree(key):
         else:
             st.caption("편지를 넣으면 내 나무가 심어져요.")
 
-        mine = [e for e in garden_state(key, safe=True) if str(e["number"]) == number]
+        mine = [e for e in garden_state(key, safe=True) if norm_num(e["number"]) == number]
         st.markdown(f"**내가 놓은 것** — {len(mine)}/{MAX_PER_STUDENT}개")
         for e in mine:
             col1, col2 = st.columns([3, 1])
@@ -1493,7 +1517,7 @@ def main():
         )
         st.markdown('<div class="sky-title intro-late">타임캡슐</div>', unsafe_allow_html=True)
         st.markdown('<div class="sky-sub intro-late">선생님이 알려준 코드를 넣어 주세요</div>', unsafe_allow_html=True)
-        code = st.text_input("반 코드", type="password")
+        code = st.text_input("반 코드", placeholder="예: 나무53")
         if st.button("들어가기"):
             found = find_class_by_code(code)
             if found:
